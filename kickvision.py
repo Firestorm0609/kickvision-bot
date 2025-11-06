@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-KickVision v20.0 — 100-MODEL ENSEMBLE
-100 calculations → 1 clean result
+KickVision v20.1 — 100-Model Football Prediction Bot
+Fixed: Alias loading, typo handling, prediction logic
 """
 
 import os
@@ -72,6 +72,10 @@ try:
                 official = parts[0]
                 for alias in parts:
                     TEAM_ALIASES[alias.lower()] = official
+                clean_file = os.path.basename(file).replace('.txt','').replace('_',' ').lower()
+                TEAM_ALIASES[clean_file] = official
+    for off in set(TEAM_ALIASES.values()):
+        TEAM_ALIASES[off.lower()] = off
     log.info(f"Loaded {len(TEAM_ALIASES)} aliases")
 except Exception as e:
     log.exception("ZIP ERROR")
@@ -164,7 +168,7 @@ def get_league_teams(league_id):
 def find_team_candidates(name):
     name_resolved = resolve_alias(name)
     search_key = re.sub(r'[^a-z0-9\s]', '', name_resolved.lower())
-    leagues = [2021, 2014, 2002, 2019, 2015, 2001, 2018]
+    leagues = list(LEAGUE_PRIORITY.values())
     candidates = []
     
     for lid in leagues:
@@ -235,6 +239,7 @@ def get_team_stats(team_id, is_home):
         stats = (round(np.mean(gf), 2), round(np.mean(ga), 2)) if gf else ((1.6, 1.2) if is_home else (1.1, 1.4))
     
     TEAM_CACHE[cache_key] = {'time': time.time(), 'data': stats}
+    save_cache()
     return stats
 
 # === 100 MODEL VARIANTS (PARALLEL) ===
@@ -242,13 +247,11 @@ def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
     random.seed(seed)
     np.random.seed(seed)
     
-    # Random tweaks
     ah = h_gf * random.uniform(0.7, 1.3)
     dh = h_ga * random.uniform(0.7, 1.3)
     aa = a_gf * random.uniform(0.7, 1.3)
     da = a_ga * random.uniform(0.7, 1.3)
     
-    # Poisson with random rho
     rho = random.uniform(-0.1, 0.15)
     home_xg = (ah / 1.4) * (da / 1.4) * 1.4 * random.uniform(1.0, 1.2)
     away_xg = (aa / 1.4) * (dh / 1.4) * 1.4 * random.uniform(0.8, 1.0)
@@ -257,14 +260,12 @@ def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
         home_xg *= (1 - rho * home_xg * away_xg)
         away_xg *= (1 - rho * home_xg * away_xg)
     
-    # Monte Carlo
     hg = np.random.poisson(home_xg, SIMS_PER_MODEL)
     ag = np.random.poisson(away_xg, SIMS_PER_MODEL)
     p_home = (hg > ag).mean()
     p_draw = (hg == ag).mean()
     p_away = (hg < ag).mean()
     
-    # Most likely score
     scores = [f"{int(h)}-{int(a)}" for h, a in zip(hg, ag)]
     most_likely = Counter(scores).most_common(1)[0][0]
     
@@ -327,7 +328,7 @@ def is_allowed(uid):
 # === HANDLERS ===
 @bot.message_handler(commands=['start'])
 def start(m):
-    bot.reply_to(m, "**KickVision v20.0** — 100 models, 1 result!\nTry: `Chelsea vs Barcelona`", parse_mode='Markdown')
+    bot.reply_to(m, "**KickVision v20.1** — 100 models, 1 result!\nTry: `Chelsea vs Barcelona`", parse_mode='Markdown')
 
 @bot.message_handler(func=lambda m: True)
 def handle(m):
@@ -391,5 +392,5 @@ def handle(m):
 
 # === START ===
 if __name__ == '__main__':
-    log.info("KickVision v20.0 STARTED — 100 MODELS")
+    log.info("KickVision v20.1 STARTED — 100 MODELS")
     bot.infinity_polling()
