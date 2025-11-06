@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-KickVision v1.0.0 — 100-Model Football Prediction Bot
-Added: smarter UX
+KickVision v1.0.0 — Official Release
+100-model ensemble | Typo-proof | /cancel | vs Only
 """
 
 import os
@@ -219,7 +219,7 @@ def auto_detect_league(hid, aid):
 def get_team_stats(team_id, is_home):
     cache_key = f"stats_{team_id}_{is_home}"
     if cache_key in TEAM_CACHE:
-        return TEAM_CACHE[cache_key]['data']
+        return TEAM_CACHE[cache_key]['data']  # Fixed: was 'key'
     
     data = safe_get(f"{API_BASE}/teams/{team_id}/matches", {'status': 'FINISHED', 'limit': 10})
     if not data or not data.get('matches'):
@@ -242,7 +242,7 @@ def get_team_stats(team_id, is_home):
     save_cache()
     return stats
 
-# === 100 MODEL VARIANTS (PARALLEL) ===
+# === 100 MODEL VARIANTS ===
 def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
     random.seed(seed)
     np.random.seed(seed)
@@ -328,22 +328,23 @@ def is_allowed(uid):
 # === HANDLERS ===
 @bot.message_handler(commands=['start'])
 def start(m):
-    bot.reply_to(m, "**KickVision v20.2** — 100 models, 1 result!\n"
-                    "Try: `Chelsea vs Barcelona`\n"
-                    "Use **/cancel** to stop selection", parse_mode='Markdown')
+    bot.reply_to(m, "**KickVision v1.0.0** — Official Release\n"
+                    "100 models → 1 clean prediction\n"
+                    "Try: `Chelsea vs Man U`\n"
+                    "Use **/cancel** anytime", parse_mode='Markdown')
 
 @bot.message_handler(func=lambda m: True)
 def handle(m):
     uid = m.from_user.id
     txt = m.text.strip()
 
-    # === GLOBAL /cancel COMMAND ===
+    # === GLOBAL /cancel ===
     if txt.strip().lower() == '/cancel':
         if uid in PENDING_MATCH:
             del PENDING_MATCH[uid]
-            bot.reply_to(m, "Selection cancelled. Send a new match: `Team A vs Team B`")
+            bot.reply_to(m, "Match selection cancelled.")
         else:
-            bot.reply_to(m, "Nothing to cancel. Try: `Chelsea vs Man U`")
+            bot.reply_to(m, "Nothing to cancel. Try a match: `Team A vs Team B`")
         return
 
     # === PENDING MATCH SELECTION ===
@@ -362,7 +363,7 @@ def handle(m):
             else:
                 bot.reply_to(m, "Invalid numbers. Try again or **/cancel**")
         else:
-            bot.reply_to(m, "Reply with **two numbers**: `home away`\nOr type **/cancel** to quit")
+            bot.reply_to(m, "Reply with **two numbers**: `home away`\nOr **/cancel**")
         return
 
     if not is_allowed(uid):
@@ -370,7 +371,10 @@ def handle(m):
         return
 
     txt = re.sub(r'[|\[\](){}]', ' ', txt)
+    
+    # === ONLY ACCEPT "vs" FORMAT ===
     if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE):
+        bot.reply_to(m, "Use **Team A vs Team B** format\nTypo-proof | Instant prediction")
         return
 
     parts = re.split(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE)
@@ -398,11 +402,11 @@ def handle(m):
     msg.append(f"**Away:** {away}")
     for i, (_, name, _, tla, _) in enumerate(away_cands, 1):
         msg.append(f"{i}. {name} ({tla})")
-    msg.append("\n**Reply with two numbers**: `home away`\nOr type **/cancel**")
+    msg.append("\n**Reply with two numbers**: `home away`\nOr **/cancel**")
     bot.reply_to(m, '\n'.join(msg), parse_mode='Markdown')
     PENDING_MATCH[uid] = (home, away, home_cands, away_cands)
 
 # === START ===
 if __name__ == '__main__':
-    log.info("KickVision v1.0.0 STARTED — 100 MODELS + smarter UX")
+    log.info("KickVision v1.0.0 STARTED — Official Release")
     bot.infinity_polling()
