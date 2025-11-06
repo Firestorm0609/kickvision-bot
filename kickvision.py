@@ -107,6 +107,8 @@ retries = Retry(total=5, backoff_factor=2, status_forcelist=[429,500,502,503,504
 session.mount('https://', HTTPAdapter(max_retries=retries))
 
 bot = telebot.TeleBot(BOT_TOKEN)
+import time
+time.sleep(2)  # Clear old Telegram session on restart
 
 # === CACHE ===
 def load_cache():
