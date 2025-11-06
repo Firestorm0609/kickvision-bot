@@ -25,7 +25,7 @@ import telebot
 from flask import Flask, request
 
 # === CONFIG ===
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Use env var
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")
 API_BASE = 'https://api.football-data.org/v4'
 ZIP_FILE = 'clubs.zip'
@@ -222,7 +222,7 @@ def auto_detect_league(hid, aid):
 def get_team_stats(team_id, is_home):
     cache_key = f"stats_{team_id}_{is_home}"
     if cache_key in TEAM_CACHE:
-        return TEAM_CACHE[cache_key]['data']
+        return TEAM_CACHE[key]['data']
     
     data = safe_get(f"{API_BASE}/teams/{team_id}/matches", {'status': 'FINISHED', 'limit': 10})
     if not data or not data.get('matches'):
@@ -328,14 +328,28 @@ def is_allowed(uid):
     user_rate[uid].append(now)
     return True
 
-# === HANDLERS ===
-@bot.message_handler(commands=['start'])
-def start(m):
-    bot.reply_to(m, "**KickVision v1.0.0** — Official Release\n"
-                    "100 models → 1 clean prediction\n"
-                    "Try: `Chelsea vs Man U`\n"
-                    "Use **/cancel** anytime", parse_mode='Markdown')
+# === HELP / HOW ===
+def send_help(m):
+    help_text = (
+        "⚽ **How KickVision Works**\n\n"
+        "I use **100 AI models** to simulate each match **1000 times per model** — that’s **100,000 simulations**!\n\n"
+        "From real stats (last 10 games), I predict:\n"
+        "• **xG** (expected goals)\n"
+        "• **Win %** for Home, Draw, Away\n"
+        "• **Most likely score**\n"
+        "• **Final verdict**\n\n"
+        "Just type: `Team A vs Team B`\n"
+        "Example: `Arsenal vs Liverpool`\n\n"
+        "Use **/cancel** to stop selection\n"
+        "Use **/start** to begin"
+    )
+    bot.reply_to(m, help_text, parse_mode='Markdown')
 
+@bot.message_handler(commands=['start', 'help', 'how'])
+def start(m):
+    send_help(m)
+
+# === MAIN HANDLER ===
 @bot.message_handler(func=lambda m: True)
 def handle(m):
     uid = m.from_user.id
@@ -364,7 +378,7 @@ def handle(m):
             else:
                 bot.reply_to(m, "Invalid numbers. Try again or **/cancel**")
         else:
-            bot.reply_to(m, "Reply with **two numbers**: `home away`\nOr **/cancel**")
+            bot.reply_to(m, "Reply with **two numbers**: `1 3` ← picks 1st home, 3rd away\nOr type **/cancel**")
         return
 
     if not is_allowed(uid):
@@ -374,7 +388,7 @@ def handle(m):
     txt = re.sub(r'[|\[\](){}]', ' ', txt)
     
     if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE):
-        bot.reply_to(m, "Use **Team A vs Team B** format\nTypo-proof | Instant prediction")
+        bot.reply_to(m, "Use **Team A vs Team B** format\nExample: `Chelsea vs Man U`\nType **/how** for details")
         return
 
     parts = re.split(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE)
@@ -385,7 +399,7 @@ def handle(m):
     away_cands = find_team_candidates(away)
 
     if not home_cands or not away_cands:
-        bot.reply_to(m, f"Not found: `{home}` or `{away}`")
+        bot.reply_to(m, f"Not found: `{home}` or `{away}`\nTry: `Man City vs Liverpool`")
         return
 
     if home_cands[0][0] > 0.9 and away_cands[0][0] > 0.9:
@@ -402,7 +416,7 @@ def handle(m):
     msg.append(f"**Away:** {away}")
     for i, (_, name, _, tla, _) in enumerate(away_cands, 1):
         msg.append(f"{i}. {name} ({tla})")
-    msg.append("\n**Reply with two numbers**: `home away`\nOr **/cancel**")
+    msg.append("\n**Reply with two numbers**: `1 3` ← picks 1st home, 3rd away\nOr type **/cancel**")
     bot.reply_to(m, '\n'.join(msg), parse_mode='Markdown')
     PENDING_MATCH[uid] = (home, away, home_cands, away_cands)
 
@@ -422,13 +436,11 @@ def webhook():
 if __name__ == '__main__':
     log.info("KickVision v1.0.0 STARTED — Official Release")
     
-    # Remove old webhook + set new one
     bot.remove_webhook()
     time.sleep(1)
     webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}"
     bot.set_webhook(url=webhook_url)
     log.info(f"Webhook set: {webhook_url}")
 
-    # Run Flask (blocks forever)
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
