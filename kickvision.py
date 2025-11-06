@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-KickVision v20.1 — 100-Model Football Prediction Bot
-Fixed: Alias loading, typo handling, prediction logic
+KickVision v1.0.0 — 100-Model Football Prediction Bot
+Added: smarter UX
 """
 
 import os
@@ -328,13 +328,25 @@ def is_allowed(uid):
 # === HANDLERS ===
 @bot.message_handler(commands=['start'])
 def start(m):
-    bot.reply_to(m, "**KickVision v20.1** — 100 models, 1 result!\nTry: `Chelsea vs Barcelona`", parse_mode='Markdown')
+    bot.reply_to(m, "**KickVision v20.2** — 100 models, 1 result!\n"
+                    "Try: `Chelsea vs Barcelona`\n"
+                    "Use **/cancel** to stop selection", parse_mode='Markdown')
 
 @bot.message_handler(func=lambda m: True)
 def handle(m):
     uid = m.from_user.id
     txt = m.text.strip()
 
+    # === GLOBAL /cancel COMMAND ===
+    if txt.strip().lower() == '/cancel':
+        if uid in PENDING_MATCH:
+            del PENDING_MATCH[uid]
+            bot.reply_to(m, "Selection cancelled. Send a new match: `Team A vs Team B`")
+        else:
+            bot.reply_to(m, "Nothing to cancel. Try: `Chelsea vs Man U`")
+        return
+
+    # === PENDING MATCH SELECTION ===
     if uid in PENDING_MATCH:
         parts = txt.split()
         if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
@@ -348,9 +360,9 @@ def handle(m):
                 bot.reply_to(m, result, parse_mode='Markdown')
                 del PENDING_MATCH[uid]
             else:
-                bot.reply_to(m, "Invalid numbers.")
+                bot.reply_to(m, "Invalid numbers. Try again or **/cancel**")
         else:
-            bot.reply_to(m, "Reply with **two numbers**: `home away`")
+            bot.reply_to(m, "Reply with **two numbers**: `home away`\nOr type **/cancel** to quit")
         return
 
     if not is_allowed(uid):
@@ -386,11 +398,11 @@ def handle(m):
     msg.append(f"**Away:** {away}")
     for i, (_, name, _, tla, _) in enumerate(away_cands, 1):
         msg.append(f"{i}. {name} ({tla})")
-    msg.append("\n**Reply with two numbers**: `home away`")
+    msg.append("\n**Reply with two numbers**: `home away`\nOr type **/cancel**")
     bot.reply_to(m, '\n'.join(msg), parse_mode='Markdown')
     PENDING_MATCH[uid] = (home, away, home_cands, away_cands)
 
 # === START ===
 if __name__ == '__main__':
-    log.info("KickVision v20.1 STARTED — 100 MODELS")
+    log.info("KickVision v1.0.0 STARTED — 100 MODELS + smarter UX")
     bot.infinity_polling()
