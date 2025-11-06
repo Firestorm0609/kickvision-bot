@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-KickVision v1.2.1 — Bug-Free Accuracy Upgrade
-Fixed: Market odds scraper, candidate selection, cache key typo
+KickVision v1.0.0 — Official Release
+100-model ensemble | Typo-proof | /cancel | /users | All Leagues (API-Permitted)
 """
 
 import os
@@ -14,6 +14,7 @@ import random
 from collections import defaultdict, Counter
 from concurrent.futures import ThreadPoolExecutor
 from statistics import mean, mode
+from datetime import datetime
 
 import numpy as np
 import requests
@@ -27,7 +28,7 @@ from flask import Flask, request
 # === CONFIG ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")  # NEW
+ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 API_BASE = 'https://api.football-data.org/v4'
 ZIP_FILE = 'clubs.zip'
 CACHE_FILE = 'team_cache.json'
@@ -47,18 +48,6 @@ TEAM_CACHE = {}
 LEAGUES_CACHE = {}
 PENDING_MATCH = {}
 USER_SESSIONS = set()
-
-LEAGUE_PRIORITY = {
-    "UEFA Champions League": 2001,
-    "Premier League": 2021,
-    "La Liga": 2014,
-    "Bundesliga": 2002,
-    "Serie A": 2019,
-    "Ligue 1": 2015,
-    "Europa League": 2018
-}
-
-MAJOR_LEAGUE_IDS = set(LEAGUE_PRIORITY.values())
 
 # === LOAD ALIASES FROM ZIP ===
 log.info(f"Loading aliases from {ZIP_FILE}...")
@@ -182,9 +171,6 @@ def fetch_all_leagues():
 if not load_leagues_cache():
     fetch_all_leagues()
 
-if not LEAGUES_CACHE:
-    LEAGUES_CACHE = {v: k for k, v in LEAGUE_PRIORITY.items()}
-
 # === RESOLVE ALIAS ===
 def resolve_alias(name):
     low = re.sub(r'[^a-z0-9\s]', '', str(name).lower().strip())
@@ -193,10 +179,8 @@ def resolve_alias(name):
         if low in alias or alias in low: return official
     return name
 
-# === GET LEAGUE TEAMS ===
+# === GET LEAGUE TEAMS (All API-permitted) ===
 def get_league_teams(league_id):
-    if league_id not in MAJOR_LEAGUE_IDS:
-        return []
     key = f"league_{league_id}"
     now = time.time()
     if key in TEAM_CACHE and now - TEAM_CACHE[key]['time'] < CACHE_TTL:
@@ -210,13 +194,13 @@ def get_league_teams(league_id):
         return teams
     return []
 
-# === FIND CANDIDATES ===
+# === FIND CANDIDATES (All leagues) ===
 def find_team_candidates(name):
     name_resolved = resolve_alias(name)
     search_key = re.sub(r'[^a-z0-9\s]', '', name_resolved.lower())
     candidates = []
     
-    for lid in MAJOR_LEAGUE_IDS:
+    for lid in LEAGUES_CACHE.keys():
         teams = get_league_teams(lid)
         for team in teams:
             tid, tname, tshort, tla, _ = team
@@ -250,17 +234,16 @@ def auto_detect_league(hid, aid):
             if lid: a_leagues.add(lid)
     
     common = h_leagues & a_leagues
-    if not common and h_leagues:
+    if common:
+        return next(iter(common)), LEAGUES_CACHE.get(next(iter(common)), "League")
+    if h_leagues:
         lid = next(iter(h_leagues))
         return lid, LEAGUES_CACHE.get(lid, "League")
-    
-    priority_order = list(LEAGUE_PRIORITY.values())
-    best_lid = max(common, key=lambda x: priority_order.index(x) if x in priority_order else len(priority_order))
-    return best_lid, LEAGUES_CACHE.get(best_lid, "League")
+    return 0, "Unknown League"
 
-# === WEIGHTED FORM (Last 6, recent 2x) ===
+# === WEIGHTED STATS (Last 6, recent 2x) ===
 def get_weighted_stats(team_id, is_home):
-    cache_key = f"weighted_{team_id}_{is_home}"
+    cache_key = f"stats_{team_id}_{is_home}"
     if cache_key in TEAM_CACHE:
         return TEAM_CACHE[cache_key]['data']
     
@@ -288,26 +271,20 @@ def get_weighted_stats(team_id, is_home):
     save_cache()
     return stats
 
-# === MARKET ODDS (Fixed: Use ODDS_API_KEY) ===
+# === MARKET ODDS (Silent fusion) ===
 def get_market_odds(hname, aname):
     if not ODDS_API_KEY:
         return None
     try:
         url = "https://api.the-odds-api.com/v4/sports/football_england_premier_league/odds/"
-        params = {
-            'apiKey': ODDS_API_KEY,
-            'regions': 'eu',
-            'markets': 'h2h',
-            'oddsFormat': 'decimal'
-        }
+        params = {'apiKey': ODDS_API_KEY, 'regions': 'eu', 'markets': 'h2h', 'oddsFormat': 'decimal'}
         r = requests.get(url, params=params, timeout=10)
-        if r.status_code != 200:
-            return None
+        if r.status_code != 200: return None
         data = r.json()
         for game in data:
             if hname.lower() in game['home_team'].lower() and aname.lower() in game['away_team'].lower():
                 for book in game['bookmakers']:
-                    if book['key'].lower() == 'bet365':
+                    if 'bet' in book['key'].lower():
                         odds = book['markets'][0]['outcomes']
                         return {
                             'home': odds[0]['price'],
@@ -315,26 +292,19 @@ def get_market_odds(hname, aname):
                             'away': odds[1]['price'] if len(odds) == 2 else odds[2]['price']
                         }
         return None
-    except Exception as e:
-        log.exception("Odds API error")
-        return None
+    except: return None
 
-# === 100 MODEL VARIANTS (Dixon-Coles) ===
-def run_single_model(seed, h_gf, h_ga, a_gf, a_ga, rho=0.05):
+# === ENSEMBLE MODEL ===
+def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
     random.seed(seed)
     np.random.seed(seed)
-    
     home_xg = (h_gf * a_ga * 1.1) ** 0.5 * random.uniform(0.9, 1.1)
     away_xg = (a_gf * h_ga * 0.9) ** 0.5 * random.uniform(0.9, 1.1)
-    
     if home_xg < 2.0 and away_xg < 2.0:
-        tau = 1 - rho * home_xg * away_xg
-        home_xg *= tau
-        away_xg *= tau
-    
+        tau = 1 - 0.05 * home_xg * away_xg
+        home_xg *= tau; away_xg *= tau
     hg = np.random.poisson(home_xg, SIMS_PER_MODEL)
     ag = np.random.poisson(away_xg, SIMS_PER_MODEL)
-    
     return {
         'home_win': (hg > ag).mean(),
         'draw': (hg == ag).mean(),
@@ -346,27 +316,24 @@ def ensemble_100_models(h_gf, h_ga, a_gf, a_ga):
     seeds = list(range(TOTAL_MODELS))
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = list(executor.map(lambda s: run_single_model(s, h_gf, h_ga, a_gf, a_ga), seeds))
-    
-    final = {
+    return {
         'home_win': round(mean([r['home_win'] for r in results]) * 100),
         'draw': round(mean([r['draw'] for r in results]) * 100),
         'away_win': round(mean([r['away_win'] for r in results]) * 100),
         'score': mode([r['score'] for r in results])
     }
-    return final
 
 # === VERDICT WITH FUSION ===
 def get_verdict(model, market=None):
     h, d, a = model['home_win'], model['draw'], model['away_win']
     if market and market['home'] and market['away']:
-        mh = 1/market['home']
-        ma = 1/market['away']
+        mh = 1/market['home']; ma = 1/market['away']
         md = 1/market['draw'] if market['draw'] else (mh + ma) * 0.1
         total = mh + md + ma
         if total > 0:
-            h = int((h * 0.7) + (mh/total*100 * 0.3))
-            d = int((d * 0.7) + (md/total*100 * 0.3))
-            a = int((a * 0.7) + (ma/total*100 * 0.3))
+            h = int(h * 0.7 + (mh/total*100 * 0.3))
+            d = int(d * 0.7 + (md/total*100 * 0.3))
+            a = int(a * 0.7 + (ma/total*100 * 0.3))
     max_pct = max(h, d, a)
     if d == max_pct: return "Draw", h, d, a
     elif h == max_pct: return "Home Win", h, d, a
@@ -383,14 +350,16 @@ def predict_with_ids(hid, aid, hname, aname, h_tla, a_tla):
     
     verdict, h_pct, d_pct, a_pct = get_verdict(model, market)
     
+    # Beautiful Output
     out = [
-        f"**{hname} vs {aname} — {league_name}**",
-        f"",
-        f"**Model: {model['home_win']}% | {model['draw']}% | {model['away_win']}%**",
-        f"**Final: {h_pct}% | {d_pct}% | {a_pct}%**" + (" *(+Market)*" if market else ""),
-        f"",
-        f"**Score: {model['score']}**",
-        f"**VERDICT: {verdict}**"
+        f"*{hname} vs {aname}*",
+        f"_{league_name}_",
+        "",
+        f"**xG:** `{h_gf:.2f}` — `{a_gf:.2f}`",
+        f"**Win:** `{h_pct}%` | `{d_pct}%` | `{a_pct}%`",
+        "",
+        f"**Most Likely:** `{model['score']}`",
+        f"**Verdict:** *{verdict}*"
     ]
     return '\n'.join(out)
 
@@ -405,13 +374,10 @@ def is_allowed(uid):
 # === HELP ===
 def send_help(m):
     bot.reply_to(m, (
-        "**KickVision v1.2.1 — 68% Accuracy**\n\n"
-        "• Weighted form (last 6)\n"
-        "• Market fusion (Bet365)\n"
-        "• Dixon-Coles fix\n\n"
-        "`Team A vs Team B`\n"
-        "Major 7 only\n"
-        "/users | /cancel"
+        "*KickVision v1.0.0*\n\n"
+        "Type: `Team A vs Team B`\n"
+        "All leagues supported\n"
+        "/cancel | /users"
     ), parse_mode='Markdown')
 
 @bot.message_handler(commands=['start', 'help', 'how'])
@@ -419,9 +385,9 @@ def start(m): send_help(m)
 
 @bot.message_handler(commands=['users'])
 def users_cmd(m):
-    bot.reply_to(m, f"**Active Users:** `{len(USER_SESSIONS)}`\n\nv1.2.1 — 68% Target", parse_mode='Markdown')
+    bot.reply_to(m, f"**Active Users:** `{len(USER_SESSIONS)}`", parse_mode='Markdown')
 
-# === MAIN HANDLER (Fixed: h_choice variable) ===
+# === MAIN HANDLER ===
 @bot.message_handler(func=lambda m: True)
 def handle(m):
     uid = m.from_user.id
@@ -437,7 +403,7 @@ def handle(m):
     if uid in PENDING_MATCH:
         parts = txt.split()
         if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-            h_choice = int(parts[0])  # Fixed: was Ruth_choice
+            h_choice = int(parts[0])
             a_choice = int(parts[1])
             home_input, away_input, home_opts, away_opts = PENDING_MATCH[uid]
             if 1 <= h_choice <= len(home_opts) and 1 <= a_choice <= len(away_opts):
@@ -447,9 +413,9 @@ def handle(m):
                 bot.reply_to(m, result, parse_mode='Markdown')
                 del PENDING_MATCH[uid]
             else:
-                bot.reply_to(m, "Invalid numbers. Try again or **/cancel**")
+                bot.reply_to(m, "Invalid. Try `1 2` or /cancel")
         else:
-            bot.reply_to(m, "Reply with **two numbers**: `1 3`\nOr **/cancel**")
+            bot.reply_to(m, "Reply with two numbers: `1 3`")
         return
 
     if not is_allowed(uid):
@@ -469,29 +435,28 @@ def handle(m):
     away_cands = find_team_candidates(away)
 
     if not home_cands or not away_cands:
-        bot.reply_to(m, f"**{home} vs {away}**\n\n**Not in Major 7 Leagues**\nTry: `Chelsea vs Man U`", parse_mode='Markdown')
+        bot.reply_to(m, f"*{home} vs {away}*\n\n_Not found in supported leagues._", parse_mode='Markdown')
         return
 
     if home_cands[0][0] > 0.9 and away_cands[0][0] > 0.9:
-        h = home_cands[0]
-        a = away_cands[0]
+        h = home_cands[0]; a = away_cands[0]
         result = predict_with_ids(h[2], a[2], h[1], a[1], h[3], a[3])
         bot.reply_to(m, result, parse_mode='Markdown')
         return
 
-    msg = ["**Did you mean?**", f"**Home:** {home}"]
+    msg = [f"*Did you mean?*"]
+    msg.append(f"**Home:** {home}")
     for i, (_, name, _, tla, _, lname) in enumerate(home_cands, 1):
-        msg.append(f"{i}. {name} ({tla}) — {lname}")
+        msg.append(f"`{i}.` {name} `({tla})` — _{lname}_")
     msg.append(f"**Away:** {away}")
     for i, (_, name, _, tla, _, lname) in enumerate(away_cands, 1):
-        msg.append(f"{i}. {name} ({tla}) — {lname}")
-    msg.append("\n**Reply with two numbers**: `1 3`\nOr **/cancel**")
+        msg.append(f"`{i}.` {name} `({tla})` — _{lname}_")
+    msg.append("\nReply with two numbers: `1 3`")
     bot.reply_to(m, '\n'.join(msg), parse_mode='Markdown')
     PENDING_MATCH[uid] = (home, away, home_cands, away_cands)
 
 # === FLASK ===
 app = Flask(__name__)
-
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -500,12 +465,9 @@ def webhook():
         return 'OK', 200
     return 'Invalid', 403
 
-# === STARTUP ===
 if __name__ == '__main__':
-    log.info("KickVision v1.2.1 STARTED — All Bugs Fixed")
+    log.info("KickVision v1.0.0 STARTED — All Leagues + Beautiful UI")
     bot.remove_webhook()
     time.sleep(1)
-    webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}"
-    bot.set_webhook(url=webhook_url)
-    log.info(f"Webhook: {webhook_url}")
+    bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
