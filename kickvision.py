@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 KickVision v1.0.0 — Official Release
-100-model ensemble | Typo-proof | /cancel | vs Only | Full League Support
+100-model ensemble | Typo-proof | /cancel | vs Only | Complete Global Team Support - Expanded Leagues
 """
 
 import os
@@ -56,7 +56,7 @@ LEAGUE_PRIORITY = {
     "Europa League": 2018
 }
 
-# === LOAD ALIASES ===
+# === LOAD ALIASES FROM ZIP ===
 log.info(f"Loading aliases from {ZIP_FILE}...")
 if not os.path.exists(ZIP_FILE):
     log.error(f"{ZIP_FILE} NOT FOUND!")
@@ -79,7 +79,7 @@ try:
                 TEAM_ALIASES[clean_file] = official
     for off in set(TEAM_ALIASES.values()):
         TEAM_ALIASES[off.lower()] = off
-    log.info(f"Loaded {len(TEAM_ALIASES)} aliases")
+    log.info(f"Loaded {len(TEAM_ALIASES)} aliases from ZIP")
 except Exception as e:
     log.exception("ZIP ERROR")
     raise SystemExit(1)
@@ -183,6 +183,394 @@ if not load_leagues_cache():
 
 if not LEAGUES_CACHE:
     LEAGUES_CACHE = {v: k for k, v in LEAGUE_PRIORITY.items()}
+
+# === COMPLETE GLOBAL NON-MAJOR TEAM ALIASES ===
+# Full teams from expanded leagues with common aliases
+GLOBAL_NON_MAJOR_TEAMS = [
+    # SCOTTISH PREMIERSHIP 2024/25 - All 12 teams
+    ["Aberdeen FC", "aberdeen", "dons", "the dons"],
+    ["Celtic FC", "celtic", "glasgow celtic", "bhoys", "hoops", "the bhoys", "celts"],
+    ["Dundee FC", "dundee", "dundee fc", "the dee"],
+    ["Dundee United FC", "dundee united", "dundee utd", "tangerines", "the terrors"],
+    ["Heart of Midlothian FC", "hearts", "heart of midlothian", "jambos", "hmfc"],
+    ["Hibernian FC", "hibernian", "hibs", "hibees"],
+    ["Kilmarnock FC", "kilmarnock", "killie"],
+    ["Motherwell FC", "motherwell", "well", "steelmen"],
+    ["Rangers FC", "rangers", "glasgow rangers", "gers", "teddy bears", "bears", "light blues", "the gers"],
+    ["Ross County FC", "ross county", "staggies"],
+    ["St Johnstone FC", "st johnstone", "saints"],
+    ["St Mirren FC", "st mirren", "buddies", "saints"],
+
+    # SWEDISH ALLSVENSKAN 2024 - All 16 teams
+    ["AIK", "aik", "aik stockholm", "gnaget"],
+    ["BK Häcken", "hacken", "häcken", "hacken gothenburg", "goteborg hacken", "wasps"],
+    ["Djurgårdens IF", "djurgarden", "djurgårdens", "dif", "järnkaminerna"],
+    ["GAIS", "gais", "gais gothenburg"],
+    ["Hammarby IF", "hammarby", "bajen"],
+    ["IF Elfsborg", "elfsborg", "elfsborg boras", "guliganerna"],
+    ["IF Brommapojkarna", "brommapojkarna", "bp", "if bp"],
+    ["IFK Göteborg", "goteborg", "ifk goteborg", "blåvitt", "änglarna"],
+    ["IFK Norrköping", "norrkoping", "ifk norrköping", "peking"],
+    ["IK Sirius", "sirius", "ik sirius", "sirius uppsala"],
+    ["Kalmar FF", "kalmar", "kalmar ff", "röda bröder"],
+    ["Malmö FF", "malmo", "malmö", "malmo ff", "di blåe"],
+    ["Västerås SK", "vasteras sk", "vsk", "västerås", "grönvitt"],
+    ["Värnamo IF", "varnamo", "ifk varnamo"],
+    ["IFK Värnamo", "ifk varnamo", "varnamo"],
+    ["Halmstads BK", "halmstad", "halmstads bk", "hbk"],
+
+    # ENGLISH NATIONAL LEAGUE 2024/25 - All 24 teams
+    ["Aldershot Town FC", "aldershot", "shots"],
+    ["Altrincham FC", "altrincham"],
+    ["Barnet FC", "barnet", "bees"],
+    ["Boreham Wood FC", "boreham wood", "wood"],
+    ["Boston United FC", "boston united"],
+    ["Braintree Town FC", "braintree town"],
+    ["Chesterfield FC", "chesterfield", "spireites"],
+    ["Dagenham & Redbridge FC", "dagenham", "daggers"],
+    ["Eastleigh FC", "eastleigh"],
+    ["Ebbsfleet United FC", "ebbsfleet", "fleet"],
+    ["FC Halifax Town", "halifax town"],
+    ["Forest Green Rovers FC", "forest green", "rovers"],
+    ["Gateshead FC", "gateshead"],
+    ["Hartlepool United FC", "hartlepool", "pools"],
+    ["Oldham Athletic AFC", "oldham", "latics"],
+    ["Rochdale AFC", "rochdale"],
+    ["Solihull Moors FC", "solihull moors", "moors"],
+    ["Southend United FC", "southend", "shrimpers"],
+    ["York City FC", "york city", "minstermen"],
+    ["Woking FC", "woking"],
+    ["Wealdstone FC", "wealdstone"],
+    ["Fylde FC", "fylde"],
+    ["Sutton United FC", "sutton united"],
+    ["Tamworth FC", "tamworth"],
+
+    # EGYPTIAN PREMIER LEAGUE 2024/25 - All 18 teams
+    ["Al Ahly SC", "al ahly", "ahly", "red devils", "club of the century"],
+    ["Al Ittihad Alexandria Club", "al ittihad", "ittihad alexandria"],
+    ["Al Masry SC", "al masry", "masry", "green eagles"],
+    ["Ceramica Cleopatra FC", "ceramica cleopatra", "ceramica"],
+    ["El Geish SC", "el geish", "talaea el gaish", "military"],
+    ["El Gouna FC", "el gouna", "gouna"],
+    ["ENPPI Club", "enppi", "enppi club"],
+    ["Future FC", "future fc", "future"],
+    ["Ghazl El Mahalla SC", "ghazl el mahalla"],
+    ["Ismaily SC", "ismaily", "daraweesh", "brazil of egypt"],
+    ["Modern Future FC", "modern future", "modern sport"],
+    ["National Bank of Egypt SC", "national bank", "nbe"],
+    ["Pharco FC", "pharco", "pharco fc"],
+    ["Pyramids FC", "pyramids fc", "pyramids"],
+    ["Smouha SC", "smouha"],
+    ["Zamalek SC", "zamalek", "white knights", "royal club"],
+    ["ZED FC", "zed fc"],
+    ["Haras El Hodood SC", "haras el hodood", "hodood"],
+
+    # BRAZILIAN SERIE A 2024 - All 20 teams
+    ["Athletico Paranaense", "athletico pr", "furacão", "rubro-negro"],
+    ["Atlético Goianiense", "atletico goianiense", "dragão", "atletico-go"],
+    ["Atlético Mineiro", "atletico mineiro", "galo", "atletico-mg"],
+    ["Bahia", "bahia", "tricolor", "esquadrao"],
+    ["Botafogo FR", "botafogo", "glorioso", "botafogo fr"],
+    ["Bragantino", "bragantino", "red bull bragantino", "braga"],
+    ["Ceará SC", "ceara", "vozão"],
+    ["Corinthians", "corinthians", "timao", "parque são jorge"],
+    ["Criciúma EC", "criciuma", "tigre"],
+    ["Cruzeiro EC", "cruzeiro", "raposa", "celeste"],
+    ["Cuiabá EC", "cuiaba", "dourado"],
+    ["Flamengo", "flamengo", "fla", "mengao", "rubro-negro"],
+    ["Fluminense FC", "fluminense", "tricolor", "flu"],
+    ["Fortaleza EC", "fortaleza", "leão do pici"],
+    ["Grêmio FBPA", "gremio", "imortal", "tricolor gaucho"],
+    ["Internacional", "internacional", "colorado", "inter"],
+    ["Juventude", "juventude", "juvenude"],
+    ["Palmeiras", "palmeiras", "verdão", "porco"],
+    ["São Paulo FC", "sao paulo", "tricolor", "soberano"],
+    ["Vasco da Gama", "vasco", "gigante da colina", "cruzmaltino"],
+
+    # MLS 2024 - All 29 teams
+    ["Atlanta United FC", "atlanta united", "atl", "five stripes"],
+    ["Austin FC", "austin fc"],
+    ["Charlotte FC", "charlotte fc"],
+    ["Chicago Fire FC", "chicago fire"],
+    ["FC Cincinnati", "fc cincinnati", "cincinnati"],
+    ["Columbus Crew", "columbus crew"],
+    ["D.C. United", "dc united"],
+    ["FC Dallas", "fc dallas", "dallas"],
+    ["Houston Dynamo FC", "houston dynamo"],
+    ["Sporting Kansas City", "sporting kc", "kansas city"],
+    ["LA Galaxy", "la galaxy"],
+    ["Los Angeles FC", "lafc"],
+    ["Inter Miami CF", "inter miami", "miami"],
+    ["Minnesota United FC", "minnesota united"],
+    ["CF Montréal", "cf montreal"],
+    ["New England Revolution", "new england"],
+    ["New York City FC", "nyc fc"],
+    ["New York Red Bulls", "new york red bulls"],
+    ["Orlando City SC", "orlando city"],
+    ["Philadelphia Union", "philadelphia union"],
+    ["Portland Timbers", "portland timbers"],
+    ["Real Salt Lake", "real salt lake"],
+    ["San Jose Earthquakes", "san jose earthquakes"],
+    ["Seattle Sounders FC", "seattle sounders"],
+    ["St. Louis City SC", "st louis city"],
+    ["Toronto FC", "toronto fc"],
+    ["Vancouver Whitecaps FC", "vancouver whitecaps"],
+    ["Nashville SC", "nashville sc"],
+    ["Wrexham AFC", "wrexham", "red dragons", "the dragons"],
+
+    # J-LEAGUE 2024 - All 20 teams
+    ["Albirex Niigata", "albirex niigata"],
+    ["Avispa Fukuoka", "avispa fukuoka"],
+    ["Cerezo Osaka", "cerezo osaka"],
+    ["Consadole Sapporo", "consadole sapporo", "hokkaido consadole"],
+    ["FC Tokyo", "fc tokyo"],
+    ["Gamba Osaka", "gamba osaka"],
+    ["Kashima Antlers", "kashima antlers"],
+    ["Kawasaki Frontale", "kawasaki frontale"],
+    ["Kyoto Sanga FC", "kyoto sanga"],
+    ["Machida Zelvia", "machida zelvia"],
+    ["Nagoya Grampus", "nagoya grampus"],
+    ["Sanfrecce Hiroshima", "sanfrecce hiroshima"],
+    ["Shonan Bellmare", "shonan bellmare"],
+    ["Urawa Red Diamonds", "urawa reds", "red diamonds"],
+    ["Vissel Kobe", "vissel kobe"],
+    ["Yokohama F. Marinos", "yokohama marinos"],
+    ["Yokohama FC", "yokohama fc"],
+    ["FC Gifu", "fc gifu"],
+    ["Jubilo Iwata", "jubilo iwata"],
+    ["Omiya Ardija", "omiya ardija"],
+
+    # PRIMEIRA LIGA 2024/25 - All 18 teams
+    ["AVS Futebol SAD", "avs", "avs futebol"],
+    ["Boavista FC", "boavista", "panteras"],
+    ["Casa Pia AC", "casa pia"],
+    ["CD Nacional", "nacional", "madeira"],
+    ["FC Arouca", "arouca"],
+    ["FC Famalicão", "famalicao"],
+    ["FC Porto", "porto", "dragões"],
+    ["Gil Vicente FC", "gil vicente"],
+    ["Moreirense FC", "moreirense"],
+    ["Os Belenenses SAD", "belenenses"],
+    ["Rio Ave FC", "rio ave"],
+    ["SC Braga", "braga", "arsenalistas"],
+    ["SL Benfica", "benfica", "águias"],
+    ["Sporting CP", "sporting", "leões"],
+    ["FC Vizela", "vizela"],
+    ["Vitória SC", "vitoria", "concelheiros"],
+    ["Estoril Praia", "estoril praia"],
+    ["Santa Clara", "santa clara"],
+
+    # EREDIVISIE 2024/25 - All 18 teams
+    ["AFC Ajax", "ajax", "godenzonen"],
+    ["AZ Alkmaar", "az alkmaar"],
+    ["FC Groningen", "fc groningen"],
+    ["FC Twente", "fc twente"],
+    ["FC Utrecht", "fc utrecht"],
+    ["Fortuna Sittard", "fortuna sittard"],
+    ["Go Ahead Eagles", "go ahead eagles"],
+    ["NAC Breda", "nac breda"],
+    ["NEC Nijmegen", "nec nijmegen"],
+    ["PEC Zwolle", "pec zwolle"],
+    ["PSV Eindhoven", "psv", "boeren"],
+    ["RKC Waalwijk", "rkc waalwijk"],
+    ["SC Heerenveen", "sc heerenveen"],
+    ["Sparta Rotterdam", "sparta rotterdam"],
+    ["FC Volendam", "fc volendam"],
+    ["Vitesse Arnhem", "vitesse"],
+    ["Willem II", "willem ii"],
+    ["Heracles Almelo", "heracles almelo"],
+
+    # SAUDI PRO LEAGUE 2024/25 - All 18 teams
+    ["Al Ahli SFC", "al ahli", "ahli"],
+    ["Al Akhdood Club", "al akhdood"],
+    ["Al Akhdoud", "al akhdoud"],
+    ["Al Ettifaq FC", "al ettifaq"],
+    ["Al Fateh SC", "al fateh"],
+    ["Al Hilal SFC", "al hilal", "hilal"],
+    ["Al Ittihad Club", "al ittihad", "ittihad"],
+    ["Al Khaleej FC", "al khaleej"],
+    ["Al Nassr FC", "al nassr", "nassr"],
+    ["Al Orobah FC", "al orobah"],
+    ["Al Raed SFC", "al raed"],
+    ["Al Riyadh SC", "al riyadh"],
+    ["Al Shabab FC", "al shabab"],
+    ["Al Taawoun FC", "al taawoun"],
+    ["Al Wehda Mecca", "al wehda"],
+    ["Al Fayha FC", "al fayha"],
+    ["Damac FC", "damac"],
+    ["Al Kholood", "al kholood"],
+
+    # ARGENTINE PRIMERA DIVISIÓN 2024 - All 28 teams
+    ["Argentinos Juniors", "argentinos juniors"],
+    ["Arsenal de Sarandí", "arsenal sarandi"],
+    ["Atlético Tucumán", "atletico tucuman"],
+    ["Banfield", "banfield"],
+    ["Boca Juniors", "boca juniors", "xeneizes"],
+    ["Central Córdoba SdE", "central cordoba"],
+    ["Deportivo Riestra", "deportivo riestra"],
+    ["Defensa y Justicia", "defensa justicia"],
+    ["Estudiantes LP", "estudiantes lp"],
+    ["Gimnasia LP", "gimnasia lp"],
+    ["Godoy Cruz", "godoy cruz"],
+    ["Independiente", "independiente"],
+    ["Independiente Rivadavia", "independiente rivadavia"],
+    ["Instituto AC Córdoba", "instituto cordoba"],
+    ["Lanús", "lanus"],
+    ["Newell's Old Boys", "newells"],
+    ["Platense", "platense"],
+    ["Racing Club", "racing club"],
+    ["River Plate", "river plate", "millonarios"],
+    ["Rosario Central", "rosario central"],
+    ["Sarmiento", "sarmiento"],
+    ["Talleres Córdoba", "talleres cordoba"],
+    ["Tigre", "tigre"],
+    ["Unión Santa Fe", "union santa fe"],
+    ["Vélez Sarsfield", "velez sarsfield"],
+    ["Barracas Central", "barracas central"],
+    ["Huracán", "huracan"],
+    ["CA Independiente", "independiente", "rey de copas", "rojo"],
+
+    # LIGA MX 2024/25 - All 18 teams
+    ["América", "america", "águilas"],
+    ["Atlas", "atlas"],
+    ["Atlético San Luis", "atletico san luis"],
+    ["Cruz Azul", "cruz azul", "cementeros"],
+    ["FC Juárez", "fc juarez"],
+    ["León", "leon"],
+    ["Mazatlán FC", "mazatlan"],
+    ["Monterrey", "monterrey"],
+    ["Morelia", "morelia"],
+    ["Necaxa", "necaxa"],
+    ["Pachuca", "pachuca"],
+    ["Puebla", "puebla"],
+    ["Pumas UNAM", "pumas unam", "pumas"],
+    ["Querétaro", "queretaro"],
+    ["Santos Laguna", "santos laguna"],
+    ["Tijuana", "tijuana", "xolos"],
+    ["Tigres UANL", "tigres", "felinos"],
+    ["Toluca", "toluca"],
+
+    # 2. BUNDESLIGA 2024/25 - All 18 teams
+    ["1. FC Kaiserslautern", "kaiserslautern", "roten teufel"],
+    ["1. FC Nürnberg", "nurnberg", "der club"],
+    ["1. FC Saarbrücken", "saarbrucken"],
+    ["1. FC Union Berlin", "union berlin", "eisern union"],
+    ["1. FC Magdeburg", "magdeburg"],
+    ["Eintracht Braunschweig", "braunschweig"],
+    ["Elversberg", "elversberg"],
+    ["Fortuna Düsseldorf", "duesseldorf", "f95"],
+    ["Hansa Rostock", "hansa rostock", "kogge"],
+    ["Hertha BSC", "hertha bsc", "die alte dame"],
+    ["H Hamburger SV", "hsv", "der dinos"],
+    ["Preußen Münster", "preussen munster"],
+    ["SC Paderborn 07", "paderborn"],
+    ["Schalke 04", "schalke", "die knappen"],
+    ["SpVgg Greuther Fürth", "fuerth", "kleeblätter"],
+    ["SV Darmstadt 98", "darmstadt", "lilien"],
+    ["SV Elversberg", "elversberg"],
+    ["1. FC Köln", "koeln", "geissboecke"],
+
+    # SERIE B 2024/25 - All 20 teams
+    ["Ascoli FC", "ascoli"],
+    ["Brescia Calcio", "brescia"],
+    ["Catanzaro", "catanzaro"],
+    ["Cesena FC", "cesena"],
+    ["Cittadella", "cittadella"],
+    ["Cosenza Calcio", "cosenza"],
+    ["Cremonese", "cremonese"],
+    ["Feralpisalo", "feralpisalo"],
+    ["Mantova 1911", "mantova"],
+    ["Modena FC", "modena"],
+    ["Novara FC", "novara"],
+    ["Palermo FC", "palermo"],
+    ["Parma Calcio 1913", "parma", "ducale"],
+    ["Pisa SC", "pisa"],
+    ["Reggiana 1919", "reggiana"],
+    ["Sampdoria", "sampdoria", "blucerchiati"],
+    ["Salernitana", "salernitana"],
+    ["Sassuolo", "sassuolo"],
+    ["Südtirol", "sudtirol"],
+    ["Venezia FC", "venezia"],
+
+    # LIGUE 2 2024/25 - All 20 teams
+    ["Amiens SC", "amiens"],
+    ["AJ Auxerre", "auxerre"],
+    ["Annecy FC", "annecy"],
+    ["AS Nancy Lorraine", "nancy", "lorrains"],
+    ["Bastia", "bastia"],
+    ["Bordeaux", "bordeaux", "girondins"],
+    ["Caen", "caen"],
+    ["Châteauroux", "chateauroux"],
+    ["Dijon FCO", "dijon"],
+    ["EN Aveyron", "en avevron"],
+    ["Estac Troyes", "troyes"],
+    ["Guingamp", "guingamp"],
+    ["Laval", "laval"],
+    ["Martigues", "martigues"],
+    ["Paris FC", "paris fc"],
+    ["Pau FC", "pau"],
+    ["Quevilly Rouen", "quevilly rouen"],
+    ["Red Star FC", "red star"],
+    ["Rodez AF", "rodez"],
+    ["US Concarneau", "concarneau"],
+
+    # CHAMPIONSHIP 2024/25 - All 24 teams
+    ["Blackburn Rovers FC", "blackburn", "rovers"],
+    ["Burnley FC", "burnley", "clarets"],
+    ["Cardiff City FC", "cardiff", "bluebirds"],
+    ["Coventry City FC", "coventry", "sky blues"],
+    ["Derby County FC", "derby", "rams"],
+    ["Hull City AFC", "hull", "tigers"],
+    ["Leeds United FC", "leeds", "whites"],
+    ["Luton Town FC", "luton", "hatters"],
+    ["Middlesbrough FC", "middlesbrough", "boro"],
+    ["Millwall FC", "millwall", "lions"],
+    ["Norwich City FC", "norwich", "canaries"],
+    ["Oxford United FC", "oxford", "u’s"],
+    ["Plymouth Argyle FC", "plymouth", "pilgrims"],
+    ["Portsmouth FC", "portsmouth", "pompey"],
+    ["Preston North End FC", "preston", "lilywhites"],
+    ["Queens Park Rangers FC", "qpr", "hoops"],
+    ["Sheffield United FC", "sheffield united", "blades"],
+    ["Sheffield Wednesday FC", "sheffield wednesday", "owls"],
+    ["Stoke City FC", "stoke", "potters"],
+    ["Sunderland AFC", "sunderland", "black cats"],
+    ["Swansea City AFC", "swansea", "swans"],
+    ["Watford FC", "watford", "hornets"],
+    ["West Bromwich Albion FC", "west brom", "baggies"],
+    ["Bristol City FC", "bristol city", "robins"],
+
+    # LA LIGA 2 2024/25 - All 22 teams
+    ["Albacete Balompié", "albacete"],
+    ["CD Castellón", "castellon"],
+    ["CD Eldense", "eldense"],
+    ["CD Leganés", "leganes"],
+    ["CD Mirandés", "mirandes"],
+    ["CD Tenerife", "tenerife"],
+    ["CF Reus Deportiu", "reus"],
+    ["Deportivo Alavés", "alaves"],
+    [ "Deportivo de La Coruña", "deportivo la coruna", "depor"],
+    ["Elche CF", "elche"],
+    ["FC Andorra", "andorra"],
+    ["FC Cartagena", "cartagena"],
+    ["Girona FC", "girona"],
+    ["Levante UD", "levante"],
+    ["Racing Ferrol", "racing ferrol"],
+    ["Racing Santander", "racing santander", "montañeses"],
+    ["Real Oviedo", "oviedo"],
+    ["SD Amorebieta", "amorebieta"],
+    ["SD Eibar", "eibar"],
+    ["SD Huesca", "huesca"],
+    ["SD Logroñés", "logrones"],
+    ["Sporting Gijón", "sporting gijon"]
+]
+
+# Inject all non-major aliases
+for team in GLOBAL_NON_MAJOR_TEAMS:
+    official = team[0]
+    for alias in team[1:]:
+        TEAM_ALIASES[alias.lower()] = official
+log.info(f"Injected {len(GLOBAL_NON_MAJOR_TEAMS)} non-major teams with aliases")
 
 # === RESOLVE ALIAS ===
 def resolve_alias(name):
@@ -380,7 +768,7 @@ def send_help(m):
         "• **Most likely score**\n"
         "• **Final verdict**\n\n"
         "Just type: `Team A vs Team B`\n"
-        "Example: `Lincoln vs York` (works for minor leagues too!)\n\n"
+        "Example: `Gers vs Bhoys` or `Hacken vs Malmo`\n\n"
         "Use **/cancel** to stop selection\n"
         "Use **/start** to begin"
     )
@@ -429,7 +817,7 @@ def handle(m):
     txt = re.sub(r'[|\[\](){}]', ' ', txt)
     
     if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE):
-        bot.reply_to(m, "Use **Team A vs Team B** format\nExample: `Lincoln vs York`\nType **/how** for details")
+        bot.reply_to(m, "Use **Team A vs Team B** format\nExample: `Gers vs Bhoys`\nType **/how** for details")
         return
 
     parts = re.split(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE)
@@ -440,7 +828,7 @@ def handle(m):
     away_cands = find_team_candidates(away)
 
     if not home_cands or not away_cands:
-        bot.reply_to(m, f"Couldn't find: `{home}` or `{away}` in 144+ leagues.\nTry a different spelling or example: `Man City vs Liverpool`\nType **/how** for tips")
+        bot.reply_to(m, f"Couldn't find: `{home}` or `{away}`.\nTry a different spelling or major league match: `Chelsea vs Man U`\nType **/how** for tips")
         return
 
     if home_cands[0][0] > 0.9 and away_cands[0][0] > 0.9:
@@ -475,7 +863,7 @@ def webhook():
 
 # === STARTUP ===
 if __name__ == '__main__':
-    log.info("KickVision v1.0.0 STARTED — Official Release")
+    log.info("KickVision v1.0.0 STARTED — Complete Global Team Support Active")
     
     bot.remove_webhook()
     time.sleep(1)
