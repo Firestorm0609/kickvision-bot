@@ -146,7 +146,7 @@ def save_cache():
 
 load_cache()
 
-# === SAFE GET ===
+# === SAFE GET (429-RESILIENT) ===
 def safe_get(url, params=None):
     for attempt in range(3):
         try:
@@ -154,17 +154,20 @@ def safe_get(url, params=None):
             if r.status_code == 200:
                 return r.json()
             elif r.status_code == 429:
-                wait = 60 * (attempt + 1)
-                log.warning(f"Rate limit → wait {wait}s")
+                wait = 60 * (2 ** attempt)
+                log.warning(f"429 → sleeping {wait}s for {url}")
                 time.sleep(wait)
+                continue
             elif r.status_code in [403, 404]:
-                # Quietly skip unsupported leagues
                 return None
             else:
                 log.warning(f"API {r.status_code}: {url}")
                 return None
         except Exception as e:
-            log.exception(f"Request error: {e}")
+            if "429" in str(e):
+                time.sleep(60)
+            else:
+                log.exception(f"Request failed: {e}")
             time.sleep(5)
     return None
 
@@ -226,22 +229,22 @@ def get_league_teams(league_id):
         return teams
     return []
 
-# === PREWARM LEAGUES (VALIDATED) ===
+# === PREWARM LEAGUES (SAFE + THROTTLED) ===
 def prewarm_leagues():
-    log.info("Prewarming supported league teams...")
+    log.info("Prewarming supported leagues (throttled)...")
     valid_lids = []
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {ex.submit(safe_get, f"{API_BASE}/competitions/{lid}"): lid for lid in LEAGUE_MAP.values()}
-        for future in futures:
-            data = future.result()
-            if data:  # Valid league
-                lid = futures[future]
-                valid_lids.append(lid)
-                log.info(f"Validated league {lid}")
     
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        ex.map(get_league_teams, valid_lids)
-    log.info(f"Prewarmed {len(valid_lids)} leagues")
+    for lid in LEAGUE_MAP.values():
+        data = safe_get(f"{API_BASE}/competitions/{lid}")
+        if not data:
+            continue
+        valid_lids.append(lid)
+        log.info(f"Validated: {LEAGUES_CACHE.get(lid, lid)} ({lid})")
+        
+        get_league_teams(lid)
+        time.sleep(1.1)  # < 1 req/sec → avoids 429
+    
+    log.info(f"Prewarmed {len(valid_lids)} leagues safely")
 
 # === FIND CANDIDATES ===
 def find_team_candidates(name):
@@ -611,13 +614,13 @@ def webhook():
     return 'Invalid', 403
 
 if __name__ == '__main__':
-    log.info("KickVision v1.0.0 STARTED — All Features + Render Fixes")
+    log.info("KickVision v1.0.0 STARTED — Render-Ready + 429-Fixed")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
+    
     prewarm_leagues()
     
-    # RENDER PORT BIND
     port = int(os.environ.get('PORT', 5000))
-    log.info(f"Binding to port {port} on 0.0.0.0")
+    log.info(f"LISTENING ON PORT {port}")
     app.run(host='0.0.0.0', port=port, threaded=True)
