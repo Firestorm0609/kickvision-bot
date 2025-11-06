@@ -14,7 +14,7 @@ import random
 from collections import defaultdict, Counter
 from concurrent.futures import ThreadPoolExecutor
 from statistics import mean, mode
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import requests
@@ -23,6 +23,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 import telebot
+from telebot import types
 from flask import Flask, request
 
 # === CONFIG ===
@@ -65,6 +66,24 @@ LEAGUE_MAP = {
     "mls": 2011, "usa": 2011,
     "brasileirão": 2013, "brazil": 2013,
     "liga mx": 2012, "mexico": 2012
+}
+
+# === ODDS SPORT KEYS ===
+SPORT_KEYS = {
+    2021: "football_england_premier_league",
+    2014: "football_spain_la_liga",
+    2002: "football_germany_bundesliga",
+    2019: "football_italy_serie_a",
+    2015: "football_france_ligue_one",
+    2001: "football_uefa_champions_league",
+    2018: "football_uefa_europa_league",
+    2016: "football_england_championship",
+    2003: "football_netherlands_eredivisie",
+    2017: "football_portugal_primeira_liga",
+    2036: "football_turkey_super_lig",
+    2011: "football_usa_mls",
+    2013: "football_brazil_brasileirao",
+    2012: "football_mexico_liga_mx"
 }
 
 # === LOAD ALIASES FROM ZIP ===
@@ -113,16 +132,10 @@ def load_cache():
             with open(CACHE_FILE, 'r') as f:
                 data = json.load(f)
                 now = time.time()
-                new_cache = {}
+                TEAM_CACHE = {}
                 for k, v in data.items():
                     if now - v['time'] < CACHE_TTL:
-                        if k.startswith("league_"):
-                            lid = int(k.split("_")[1])
-                            fixed_teams = [team + (lid,) if len(team) == 4 else team for team in v['data']]
-                            new_cache[k] = {'time': v['time'], 'data': fixed_teams}
-                        else:
-                            new_cache[k] = v
-                TEAM_CACHE = new_cache
+                        TEAM_CACHE[k] = v
             log.info(f"Loaded cache: {len(TEAM_CACHE)} entries")
         except Exception as e:
             log.exception("Cache load error")
@@ -142,7 +155,7 @@ def safe_get(url, params=None):
                 return r.json()
             elif r.status_code == 429:
                 wait = 60 * (attempt + 1)
-                log.warning(f"429 → wait {wait}s")
+                log.warning(f"429 -> wait {wait}s")
                 time.sleep(wait)
             else:
                 log.warning(f"API {r.status_code}: {url}")
@@ -210,13 +223,19 @@ def get_league_teams(league_id):
         return teams
     return []
 
+# === PREWARM LEAGUES ===
+def prewarm_leagues():
+    log.info("Prewarming league teams...")
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        list(ex.map(get_league_teams, LEAGUE_MAP.values()))
+
 # === FIND CANDIDATES ===
 def find_team_candidates(name):
     name_resolved = resolve_alias(name)
     search_key = re.sub(r'[^a-z0-9\s]', '', name_resolved.lower())
     candidates = []
     
-    for lid in LEAGUES_CACHE.keys():
+    for lid in LEAGUE_MAP.values():
         teams = get_league_teams(lid)
         for team in teams:
             tid, tname, tshort, tla, _ = team
@@ -258,11 +277,11 @@ def auto_detect_league(hid, aid):
         return lid, LEAGUES_CACHE.get(lid, "League")
     return 0, "Unknown League"
 
-# === WEIGHTED STATS ===
-def get_weighted_stats(team_id, is_home):
-    cache_key = f"stats_{team_id}_{is_home}"
-    if cache_key in TEAM_CACHE:
-        return TEAM_CACHE[cache_key]['data']
+# === WEIGHTED STATS + xG CACHE ===
+def get_xg_stats(team_id, is_home):
+    key = f"xg_{team_id}_{'h' if is_home else 'a'}"
+    if key in TEAM_CACHE and time.time() - TEAM_CACHE[key]['time'] < 3600:
+        return TEAM_CACHE[key]['data']
     
     data = safe_get(f"{API_BASE}/teams/{team_id}/matches", {'status': 'FINISHED', 'limit': 6})
     if not data or len(data.get('matches', [])) < 3:
@@ -284,16 +303,17 @@ def get_weighted_stats(team_id, is_home):
     total_weight = sum(weights)
     stats = (round(sum(gf)/total_weight, 2), round(sum(ga)/total_weight, 2)) if total_weight > 0 else ((1.8, 1.0) if is_home else (1.2, 1.5))
     
-    TEAM_CACHE[cache_key] = {'time': time.time(), 'data': stats}
+    TEAM_CACHE[key] = {'time': time.time(), 'data': stats}
     save_cache()
     return stats
 
 # === MARKET ODDS ===
-def get_market_odds(hname, aname):
-    if not ODDS_API_KEY:
+def get_market_odds(hname, aname, lid):
+    if not ODDS_API_KEY or lid not in SPORT_KEYS:
         return None
     try:
-        url = "https://api.the-odds-api.com/v4/sports/football_england_premier_league/odds/"
+        sport = SPORT_KEYS[lid]
+        url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/"
         params = {'apiKey': ODDS_API_KEY, 'regions': 'eu', 'markets': 'h2h', 'oddsFormat': 'decimal'}
         r = requests.get(url, params=params, timeout=10)
         if r.status_code != 200: return None
@@ -309,7 +329,9 @@ def get_market_odds(hname, aname):
                             'away': odds[1]['price'] if len(odds) == 2 else odds[2]['price']
                         }
         return None
-    except: return None
+    except Exception as e:
+        log.warning(f"Odds fetch error: {e}")
+        return None
 
 # === ENSEMBLE MODEL ===
 def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
@@ -340,9 +362,10 @@ def ensemble_100_models(h_gf, h_ga, a_gf, a_ga):
         'score': mode([r['score'] for r in results])
     }
 
-# === VERDICT ===
+# === VERDICT WITH VALUE ===
 def get_verdict(model, market=None):
     h, d, a = model['home_win'], model['draw'], model['away_win']
+    value = ""
     if market and market['home'] and market['away']:
         mh = 1/market['home']; ma = 1/market['away']
         md = 1/market['draw'] if market['draw'] else (mh + ma) * 0.1
@@ -351,21 +374,25 @@ def get_verdict(model, market=None):
             h = int(h * 0.7 + (mh/total*100 * 0.3))
             d = int(d * 0.7 + (md/total*100 * 0.3))
             a = int(a * 0.7 + (ma/total*100 * 0.3))
+        if market['home'] > 2.0 and h > 60:
+            value = "\n*Value: Home Win*"
+        elif market['away'] > 2.0 and a > 60:
+            value = "\n*Value: Away Win*"
     max_pct = max(h, d, a)
-    if d == max_pct: return "Draw", h, d, a
-    elif h == max_pct: return "Home Win", h, d, a
-    else: return "Away Win", h, d, a
+    if d == max_pct: return "Draw", h, d, a, value
+    elif h == max_pct: return "Home Win", h, d, a, value
+    else: return "Away Win", h, d, a, value
 
 # === PREDICT ===
 def predict_with_ids(hid, aid, hname, aname, h_tla, a_tla):
     lid, league_name = auto_detect_league(hid, aid)
-    h_gf, h_ga = get_weighted_stats(hid, True)
-    a_gf, a_ga = get_weighted_stats(aid, False)
+    h_gf, h_ga = get_xg_stats(hid, True)
+    a_gf, a_ga = get_xg_stats(aid, False)
     
     model = ensemble_100_models(h_gf, h_ga, a_gf, a_ga)
-    market = get_market_odds(hname, aname)
+    market = get_market_odds(hname, aname, lid)
     
-    verdict, h_pct, d_pct, a_pct = get_verdict(model, market)
+    verdict, h_pct, d_pct, a_pct, value = get_verdict(model, market)
     
     out = [
         f"*{hname} vs {aname}*",
@@ -375,11 +402,11 @@ def predict_with_ids(hid, aid, hname, aname, h_tla, a_tla):
         f"**Win:** `{h_pct}%` | `{d_pct}%` | `{a_pct}%`",
         "",
         f"**Most Likely:** `{model['score']}`",
-        f"**Verdict:** *{verdict}*"
+        f"**Verdict:** *{verdict}*{value}"
     ]
     return '\n'.join(out)
 
-# === LEAGUE FIXTURES + PREDICTIONS (All Leagues) ===
+# === LEAGUE FIXTURES + PREDICTIONS ===
 def get_league_fixtures(league_name):
     lid = LEAGUE_MAP.get(league_name.lower())
     if not lid:
@@ -400,9 +427,28 @@ def get_league_fixtures(league_name):
         fixtures.append(f"*{date}*\n{home} vs {away}\n{pred}")
     return '\n\n'.join(fixtures)
 
+# === TODAY'S MATCHES ===
+@bot.message_handler(commands=['today'])
+def today(m):
+    today = datetime.now().strftime('%Y-%m-%d')
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+    fixtures = []
+    for name, lid in list(LEAGUE_MAP.items())[:6]:
+        data = safe_get(f"{API_BASE}/competitions/{lid}/matches", {'dateFrom': today, 'dateTo': tomorrow})
+        if data and data.get('matches'):
+            m = data['matches'][0]
+            h, a = m['homeTeam']['name'], m['awayTeam']['name']
+            pred = predict_with_ids(m['homeTeam']['id'], m['awayTeam']['id'], h, a, '', '')
+            fixtures.append(f"*{h} vs {a}*\n{pred}")
+    if not fixtures:
+        bot.reply_to(m, "No major games today.")
+        return
+    bot.reply_to(m, "*Today's Top Games*\n\n" + "\n\n".join(fixtures[:3]), parse_mode='Markdown')
+
 # === DYNAMIC LEAGUE HANDLER ===
-@bot.message_handler(func=lambda m: any(m.text.lower().startswith(f"/{k.replace(' ', '')}") or m.text.lower() == k for k in LEAGUE_MAP))
+@bot.message_handler(func=lambda m: any(m.text and (m.text.lower().startswith(f"/{k.replace(' ', '')}") or m.text.lower() == k) for k in LEAGUE_MAP))
 def dynamic_league_handler(m):
+    if not m.text: return
     txt = m.text.strip().lower()
     if txt.startswith('/'):
         txt = txt[1:]
@@ -421,14 +467,24 @@ def is_allowed(uid):
     user_rate[uid].append(now)
     return True
 
-# === HELP ===
+# === HELP (All Features) ===
 def send_help(m):
     leagues = ", ".join([f"`/{k.replace(' ', '')}`" for k in LEAGUE_MAP.keys() if ' ' in k])
     bot.reply_to(m, (
-        "*KickVision v1.0.0*\n\n"
-        f"Fixtures + Predictions:\n{leagues}\n\n"
-        "Or type: `Team A vs Team B`\n"
-        "/users | /cancel"
+        "*KickVision v1.0.0 — Football AI*\n\n"
+        "*Fixtures & Predictions*\n"
+        f"{leagues}\n\n"
+        "*Match Prediction*\n"
+        "`Team A vs Team B`\n"
+        "`Man City vs Arsenal`\n\n"
+        "*Commands*\n"
+        "`/today` — Top games today\n"
+        "`/users` — Active users\n"
+        "`/cancel` — Cancel selection\n"
+        "`/help` — This menu\n\n"
+        "*Inline Mode*\n"
+        "`@kickvisionbot Man` — Quick search\n\n"
+        "*100-model ensemble • xG • Odds • Value bets*"
     ), parse_mode='Markdown')
 
 @bot.message_handler(commands=['start', 'help', 'how'])
@@ -438,14 +494,39 @@ def start(m): send_help(m)
 def users_cmd(m):
     bot.reply_to(m, f"**Active Users:** `{len(USER_SESSIONS)}`", parse_mode='Markdown')
 
+# === INLINE MODE ===
+@bot.inline_handler(lambda query: query.query and len(query.query) > 3)
+def inline_query(query):
+    home = query.query.strip()
+    cands = find_team_candidates(home)[:3]
+    results = []
+    for i, (_, name, tid, tla, lid, lname) in enumerate(cands):
+        results.append(types.InlineQueryResultArticle(
+            id=str(i), title=f"{name} ({tla})", description=lname,
+            input_message_content=types.InputTextMessageContent(
+                f"Predict: {name} vs ? (reply with away team)"
+            )
+        ))
+    bot.answer_inline_query(query.id, results, cache_time=1)
+
 # === MAIN HANDLER ===
 @bot.message_handler(func=lambda m: True)
 def handle(m):
+    if not m.text: return
     uid = m.from_user.id
     txt = m.text.strip()
     USER_SESSIONS.add(uid)
 
-    if txt.strip().lower() == '/cancel':
+    # Memory cleanup
+    if random.random() < 0.001:
+        active = set()
+        try:
+            updates = bot.get_updates(limit=100)
+            active = {u.message.from_user.id for u in updates if u.message}
+        except: pass
+        USER_SESSIONS &= active
+
+    if txt.lower() == '/cancel':
         if uid in PENDING_MATCH:
             del PENDING_MATCH[uid]
             bot.reply_to(m, "Cancelled.")
@@ -475,7 +556,6 @@ def handle(m):
 
     txt = re.sub(r'[|\[\](){}]', ' ', txt)
     if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE):
-        bot.reply_to(m, "Use: `Team A vs Team B`")
         return
 
     parts = re.split(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE)
@@ -506,7 +586,7 @@ def handle(m):
     bot.reply_to(m, '\n'.join(msg), parse_mode='Markdown')
     PENDING_MATCH[uid] = (home, away, home_cands, away_cands)
 
-# === FLASK cansado===
+# === FLASK WEBHOOK ===
 app = Flask(__name__)
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
@@ -517,8 +597,9 @@ def webhook():
     return 'Invalid', 403
 
 if __name__ == '__main__':
-    log.info("KickVision v1.0.0 STARTED — All Leagues + Dynamic Fixtures")
+    log.info("KickVision v1.0.0 STARTED — All Features + Full Help")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    prewarm_leagues()
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), threaded=True)
