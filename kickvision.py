@@ -115,7 +115,7 @@ def load_cache():
                                 else:
                                     fixed_teams.append(team)
                             new_cache[k] = {'time': v['time'], 'data': fixed_teams}
-                        else:
+                                               else:
                             new_cache[k] = v
                 TEAM_CACHE = new_cache
             log.info(f"Loaded cache: {len(TEAM_CACHE)} entries")
@@ -126,6 +126,28 @@ def save_cache():
     with open(CACHE_FILE, 'w') as f:
         json.dump(TEAM_CACHE, f)
 
+load_cache()
+
+# === SAFE GET ===
+def safe_get(url, params=None):
+    for attempt in range(3):
+        try:
+            r = session.get(url, params=params, timeout=15)
+            if r.status_code == 200:
+                return r.json()
+            elif r.status_code == 429:
+                wait = 60 * (attempt + 1)
+                log.warning(f"429 → wait {wait}s")
+                time.sleep(wait)
+            else:
+                log.warning(f"API {r.status_code}: {url}")
+                return None
+        except Exception as e:
+            log.exception(f"Request error: {e}")
+            time.sleep(5)
+    return None
+
+# === LEAGUES CACHE ===
 def load_leagues_cache():
     global LEAGUES_CACHE
     if os.path.exists(LEAGUES_CACHE_FILE):
@@ -151,7 +173,7 @@ def fetch_all_leagues():
     if data and 'competitions' in data:
         for comp in data['competitions']:
             lid = comp['id']
-            LEAGUES_CACHE[lid] = comp['name']  # Or comp['area']['name'] for country
+            LEAGUES_CACHE[lid] = comp['name']
         save_leagues_cache()
         log.info(f"Fetched {len(LEAGUES_CACHE)} leagues from API")
         return True
@@ -164,28 +186,7 @@ if not load_leagues_cache():
 
 # Fallback to priority if no leagues
 if not LEAGUES_CACHE:
-    LEAGUES_CACHE = dict(LEAGUE_PRIORITY.items())  # id: name (reversed)
-
-load_cache()
-
-# === SAFE GET ===
-def safe_get(url, params=None):
-    for attempt in range(3):
-        try:
-            r = session.get(url, params=params, timeout=15)
-            if r.status_code == 200:
-                return r.json()
-            elif r.status_code == 429:
-                wait = 60 * (attempt + 1)
-                log.warning(f"429 → wait {wait}s")
-                time.sleep(wait)
-            else:
-                log.warning(f"API {r.status_code}: {url}")
-                return None
-        except Exception as e:
-            log.exception(f"Request error: {e}")
-            time.sleep(5)
-    return None
+    LEAGUES_CACHE = {v: k for k, v in LEAGUE_PRIORITY.items()}
 
 # === RESOLVE ALIAS ===
 def resolve_alias(name):
@@ -376,7 +377,7 @@ def is_allowed(uid):
 # === HELP / HOW ===
 def send_help(m):
     help_text = (
-        "⚽ **How KickVision Works**\n\n"
+        "How KickVision Works\n\n"
         "I use **100 AI models** to simulate each match **1000 times per model** — that's **100,000 simulations**!\n\n"
         "From real stats (last 10 games), I predict:\n"
         "• **xG** (expected goals)\n"
