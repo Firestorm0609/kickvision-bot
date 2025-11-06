@@ -1,3 +1,22 @@
+import threading
+import time
+import os
+
+# Fake web server to satisfy Render
+def fake_server():
+    import http.server, socketserver
+    PORT = int(os.getenv("PORT", 10000))
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"[Render] Fake server running on port {PORT}")
+        httpd.serve_forever()
+
+# Run in background
+threading.Thread(target=fake_server, daemon=True).start()
+
+# Your bot starts below...
+# (rest of your code)
+
 #!/usr/bin/env python3
 """
 KickVision v1.0.0 — Official Release
