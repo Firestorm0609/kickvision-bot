@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-KickVision v1.0.0 — Official Release
+KickVision v1.0.0 â€” Official Release
 100-model ensemble | All Leagues | Fixtures + Predictions | Bug-Free
 """
 
@@ -37,11 +37,9 @@ CACHE_TTL = 86400
 SIMS_PER_MODEL = 1000
 TOTAL_MODELS = 100
 
-# === LOGGING (QUIET) ===
+# === LOGGING ===
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 log = logging.getLogger('kickvision')
-logging.getLogger("urllib3").setLevel(logging.WARNING)
-logging.getLogger("requests").setLevel(logging.WARNING)
 
 # === GLOBAL STATE ===
 user_rate = defaultdict(list)
@@ -51,7 +49,7 @@ LEAGUES_CACHE = {}
 PENDING_MATCH = {}
 USER_SESSIONS = set()
 
-# === LEAGUE MAP (Fixed encoding) ===
+# === LEAGUE MAP (All major leagues + aliases) ===
 LEAGUE_MAP = {
     "premier league": 2021, "epl": 2021, "pl": 2021,
     "la liga": 2014, "laliga": 2014, "liga": 2014,
@@ -65,7 +63,7 @@ LEAGUE_MAP = {
     "primeira liga": 2017, "portugal": 2017,
     "super lig": 2036, "turkey": 2036,
     "mls": 2011, "usa": 2011,
-    "brasileirao": 2013, "brazil": 2013,
+    "brasileirÃ£o": 2013, "brazil": 2013,
     "liga mx": 2012, "mexico": 2012
 }
 
@@ -135,7 +133,7 @@ def save_cache():
 
 load_cache()
 
-# === SAFE GET (Silent 429) ===
+# === SAFE GET ===
 def safe_get(url, params=None):
     for attempt in range(3):
         try:
@@ -143,14 +141,14 @@ def safe_get(url, params=None):
             if r.status_code == 200:
                 return r.json()
             elif r.status_code == 429:
-                wait = 60 * (2 ** attempt)
-                log.debug(f"429 -> sleep {wait}s")
+                wait = 60 * (attempt + 1)
+                log.warning(f"429 â†’ wait {wait}s")
                 time.sleep(wait)
             else:
-                log.debug(f"API {r.status_code}")
+                log.warning(f"API {r.status_code}: {url}")
                 return None
         except Exception as e:
-            log.debug(f"Request failed: {e}")
+            log.exception(f"Request error: {e}")
             time.sleep(5)
     return None
 
@@ -212,7 +210,7 @@ def get_league_teams(league_id):
         return teams
     return []
 
-# === FIND CANDIDATES (All Leagues) ===
+# === FIND CANDIDATES ===
 def find_team_candidates(name):
     name_resolved = resolve_alias(name)
     search_key = re.sub(r'[^a-z0-9\s]', '', name_resolved.lower())
@@ -290,7 +288,7 @@ def get_weighted_stats(team_id, is_home):
     save_cache()
     return stats
 
-# === MARKET ODDS (Fixed to EPL only for now) ===
+# === MARKET ODDS ===
 def get_market_odds(hname, aname):
     if not ODDS_API_KEY:
         return None
@@ -373,7 +371,7 @@ def predict_with_ids(hid, aid, hname, aname, h_tla, a_tla):
         f"*{hname} vs {aname}*",
         f"_{league_name}_",
         "",
-        f"**xG:** `{h_gf:.2f}` — `{a_gf:.2f}`",
+        f"**xG:** `{h_gf:.2f}` â€” `{a_gf:.2f}`",
         f"**Win:** `{h_pct}%` | `{d_pct}%` | `{a_pct}%`",
         "",
         f"**Most Likely:** `{model['score']}`",
@@ -403,9 +401,8 @@ def get_league_fixtures(league_name):
     return '\n\n'.join(fixtures)
 
 # === DYNAMIC LEAGUE HANDLER ===
-@bot.message_handler(func=lambda m: any(m.text and (m.text.lower().startswith(f"/{k.replace(' ', '')}") or m.text.lower() == k) for k in LEAGUE_MAP))
+@bot.message_handler(func=lambda m: any(m.text.lower().startswith(f"/{k.replace(' ', '')}") or m.text.lower() == k for k in LEAGUE_MAP))
 def dynamic_league_handler(m):
-    if not m.text: return
     txt = m.text.strip().lower()
     if txt.startswith('/'):
         txt = txt[1:]
@@ -444,7 +441,6 @@ def users_cmd(m):
 # === MAIN HANDLER ===
 @bot.message_handler(func=lambda m: True)
 def handle(m):
-    if not m.text: return
     uid = m.from_user.id
     txt = m.text.strip()
     USER_SESSIONS.add(uid)
@@ -478,10 +474,11 @@ def handle(m):
         return
 
     txt = re.sub(r'[|\[\](){}]', ' ', txt)
-    if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE):
+    if not re.search(r'\s+vs\s+|\s+[-â€“â€”]\s+', txt, re.IGNORECASE):
+        bot.reply_to(m, "Use: `Team A vs Team B`")
         return
 
-    parts = re.split(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE)
+    parts = re.split(r'\s+vs\s+|\s+[-â€“â€”]\s+', txt, re.IGNORECASE)
     home = parts[0].strip()
     away = ' '.join(parts[1:]).strip()
 
@@ -501,15 +498,15 @@ def handle(m):
     msg = [f"*Did you mean?*"]
     msg.append(f"**Home:** {home}")
     for i, (_, name, _, tla, _, lname) in enumerate(home_cands, 1):
-        msg.append(f"`{i}.` {name} `({tla})` — _{lname}_")
+        msg.append(f"`{i}.` {name} `({tla})` â€” _{lname}_")
     msg.append(f"**Away:** {away}")
     for i, (_, name, _, tla, _, lname) in enumerate(away_cands, 1):
-        msg.append(f"`{i}.` {name} `({tla})` — _{lname}_")
+        msg.append(f"`{i}.` {name} `({tla})` â€” _{lname}_")
     msg.append("\nReply with two numbers: `1 3`")
     bot.reply_to(m, '\n'.join(msg), parse_mode='Markdown')
     PENDING_MATCH[uid] = (home, away, home_cands, away_cands)
 
-# === FLASK WEBHOOK (YOUR ORIGINAL — UNTOUCHED) ===
+# === FLASK cansado===
 app = Flask(__name__)
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
@@ -520,7 +517,7 @@ def webhook():
     return 'Invalid', 403
 
 if __name__ == '__main__':
-    log.info("KickVision v1.0.0 STARTED — All Leagues + Dynamic Fixtures")
+    log.info("KickVision v1.0.0 STARTED â€” All Leagues + Dynamic Fixtures")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
