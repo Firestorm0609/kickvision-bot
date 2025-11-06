@@ -155,8 +155,11 @@ def safe_get(url, params=None):
                 return r.json()
             elif r.status_code == 429:
                 wait = 60 * (attempt + 1)
-                log.warning(f"429 -> wait {wait}s")
+                log.warning(f"Rate limit → wait {wait}s")
                 time.sleep(wait)
+            elif r.status_code in [403, 404]:
+                # Quietly skip unsupported leagues
+                return None
             else:
                 log.warning(f"API {r.status_code}: {url}")
                 return None
@@ -223,11 +226,22 @@ def get_league_teams(league_id):
         return teams
     return []
 
-# === PREWARM LEAGUES ===
+# === PREWARM LEAGUES (VALIDATED) ===
 def prewarm_leagues():
-    log.info("Prewarming league teams...")
+    log.info("Prewarming supported league teams...")
+    valid_lids = []
     with ThreadPoolExecutor(max_workers=8) as ex:
-        list(ex.map(get_league_teams, LEAGUE_MAP.values()))
+        futures = {ex.submit(safe_get, f"{API_BASE}/competitions/{lid}"): lid for lid in LEAGUE_MAP.values()}
+        for future in futures:
+            data = future.result()
+            if data:  # Valid league
+                lid = futures[future]
+                valid_lids.append(lid)
+                log.info(f"Validated league {lid}")
+    
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        ex.map(get_league_teams, valid_lids)
+    log.info(f"Prewarmed {len(valid_lids)} leagues")
 
 # === FIND CANDIDATES ===
 def find_team_candidates(name):
@@ -597,9 +611,13 @@ def webhook():
     return 'Invalid', 403
 
 if __name__ == '__main__':
-    log.info("KickVision v1.0.0 STARTED — All Features + Full Help")
+    log.info("KickVision v1.0.0 STARTED — All Features + Render Fixes")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
     prewarm_leagues()
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), threaded=True)
+    
+    # RENDER PORT BIND
+    port = int(os.environ.get('PORT', 5000))
+    log.info(f"Binding to port {port} on 0.0.0.0")
+    app.run(host='0.0.0.0', port=port, threaded=True)
