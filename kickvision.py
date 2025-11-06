@@ -30,7 +30,7 @@ API_KEY = os.getenv("API_KEY")
 API_BASE = 'https://api.football-data.org/v4'
 ZIP_FILE = 'clubs.zip'
 CACHE_FILE = 'team_cache.json'
-LEAGUES_CACHE_FILE = 'leagues_cache.json'  # New: For all competitions
+LEAGUES_CACHE_FILE = 'leagues_cache.json'
 CACHE_TTL = 86400
 SIMS_PER_MODEL = 1000
 TOTAL_MODELS = 100
@@ -43,10 +43,9 @@ log = logging.getLogger('kickvision')
 user_rate = defaultdict(list)
 TEAM_ALIASES = {}
 TEAM_CACHE = {}
-LEAGUES_CACHE = {}  # New: All available leagues/competitions
+LEAGUES_CACHE = {}
 PENDING_MATCH = {}
 
-# Old priority (fallback for league detection)
 LEAGUE_PRIORITY = {
     "UEFA Champions League": 2001,
     "Premier League": 2021,
@@ -93,7 +92,7 @@ session.mount('https://', HTTPAdapter(max_retries=retries))
 
 # === TELEBOT ===
 bot = telebot.TeleBot(BOT_TOKEN)
-time.sleep(2)  # Clear old session
+time.sleep(2)
 
 # === CACHE ===
 def load_cache():
@@ -115,7 +114,7 @@ def load_cache():
                                 else:
                                     fixed_teams.append(team)
                             new_cache[k] = {'time': v['time'], 'data': fixed_teams}
-                                               else:
+                        else:
                             new_cache[k] = v
                 TEAM_CACHE = new_cache
             log.info(f"Loaded cache: {len(TEAM_CACHE)} entries")
@@ -168,7 +167,6 @@ def save_leagues_cache():
         json.dump({'time': time.time(), 'leagues': LEAGUES_CACHE}, f)
 
 def fetch_all_leagues():
-    """Fetch all available competitions from API (144+ worldwide)"""
     data = safe_get(f"{API_BASE}/competitions")
     if data and 'competitions' in data:
         for comp in data['competitions']:
@@ -180,11 +178,9 @@ def fetch_all_leagues():
     log.warning("Failed to fetch leagues—using priority only")
     return False
 
-# Load or fetch leagues
 if not load_leagues_cache():
     fetch_all_leagues()
 
-# Fallback to priority if no leagues
 if not LEAGUES_CACHE:
     LEAGUES_CACHE = {v: k for k, v in LEAGUE_PRIORITY.items()}
 
@@ -215,7 +211,7 @@ def get_league_teams(league_id):
 def find_team_candidates(name):
     name_resolved = resolve_alias(name)
     search_key = re.sub(r'[^a-z0-9\s]', '', name_resolved.lower())
-    leagues = list(LEAGUES_CACHE.keys())  # Now all leagues!
+    leagues = list(LEAGUES_CACHE.keys())
     candidates = []
     
     for lid in leagues:
@@ -259,7 +255,6 @@ def auto_detect_league(hid, aid):
         lid = next(iter(h_leagues))
         return lid, LEAGUES_CACHE.get(lid, "League")
     
-    # Fallback to priority order
     priority_order = list(LEAGUE_PRIORITY.values())
     best_lid = max(common, key=lambda x: priority_order.index(x) if x in priority_order else len(priority_order))
     return best_lid, LEAGUES_CACHE.get(best_lid, "League")
@@ -377,7 +372,7 @@ def is_allowed(uid):
 # === HELP / HOW ===
 def send_help(m):
     help_text = (
-        "How KickVision Works\n\n"
+        "**How KickVision Works**\n\n"
         "I use **100 AI models** to simulate each match **1000 times per model** — that's **100,000 simulations**!\n\n"
         "From real stats (last 10 games), I predict:\n"
         "• **xG** (expected goals)\n"
@@ -466,7 +461,7 @@ def handle(m):
     bot.reply_to(m, '\n'.join(msg), parse_mode='Markdown')
     PENDING_MATCH[uid] = (home, away, home_cands, away_cands)
 
-# === FLASK WEBHOOK (RENDER) ===
+# === FLASK WEBHOOK ===
 app = Flask(__name__)
 
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
