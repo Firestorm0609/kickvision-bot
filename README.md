@@ -1,4 +1,4 @@
-# KickVision v20.0 — 100-Model Football Prediction Bot
+# KickVision v1.0.0 — 100-Model Football Prediction Bot
 
 > **100 parallel Monte-Carlo models** → **1 ultra-accurate prediction**
 
