@@ -1,22 +1,3 @@
-import threading
-import time
-import os
-
-# Fake web server to satisfy Render
-def fake_server():
-    import http.server, socketserver
-    PORT = int(os.getenv("PORT", 10000))
-    Handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"[Render] Fake server running on port {PORT}")
-        httpd.serve_forever()
-
-# Run in background
-threading.Thread(target=fake_server, daemon=True).start()
-
-# Your bot starts below...
-# (rest of your code)
-
 #!/usr/bin/env python3
 """
 KickVision v1.0.0 — Official Release
@@ -41,10 +22,11 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 import telebot
+from flask import Flask, request
 
 # === CONFIG ===
-BOT_TOKEN = '8457858214:AAGLNRS3SGbrSS8--gpa3dKv07I7v2UydvQ'
-API_KEY = '0f89780a907f4789bc8ab382736cb62c'
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8457858214:AAGLNRS3SGbrSS8--gpa3dKv07I7v2UydvQ")  # Use env var
+API_KEY = os.getenv("API_KEY", "0f89780a907f4789bc8ab382736cb62c")
 API_BASE = 'https://api.football-data.org/v4'
 ZIP_FILE = 'clubs.zip'
 CACHE_FILE = 'team_cache.json'
@@ -106,9 +88,9 @@ session.headers.update({'X-Auth-Token': API_KEY})
 retries = Retry(total=5, backoff_factor=2, status_forcelist=[429,500,502,503,504])
 session.mount('https://', HTTPAdapter(max_retries=retries))
 
+# === TELEBOT ===
 bot = telebot.TeleBot(BOT_TOKEN)
-import time
-time.sleep(2)  # Clear old Telegram session on restart
+time.sleep(2)  # Clear old session
 
 # === CACHE ===
 def load_cache():
@@ -240,7 +222,7 @@ def auto_detect_league(hid, aid):
 def get_team_stats(team_id, is_home):
     cache_key = f"stats_{team_id}_{is_home}"
     if cache_key in TEAM_CACHE:
-        return TEAM_CACHE[cache_key]['data']  # Fixed: was 'key'
+        return TEAM_CACHE[cache_key]['data']
     
     data = safe_get(f"{API_BASE}/teams/{team_id}/matches", {'status': 'FINISHED', 'limit': 10})
     if not data or not data.get('matches'):
@@ -359,7 +341,6 @@ def handle(m):
     uid = m.from_user.id
     txt = m.text.strip()
 
-    # === GLOBAL /cancel ===
     if txt.strip().lower() == '/cancel':
         if uid in PENDING_MATCH:
             del PENDING_MATCH[uid]
@@ -368,7 +349,6 @@ def handle(m):
             bot.reply_to(m, "Nothing to cancel. Try a match: `Team A vs Team B`")
         return
 
-    # === PENDING MATCH SELECTION ===
     if uid in PENDING_MATCH:
         parts = txt.split()
         if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
@@ -393,7 +373,6 @@ def handle(m):
 
     txt = re.sub(r'[|\[\](){}]', ' ', txt)
     
-    # === ONLY ACCEPT "vs" FORMAT ===
     if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE):
         bot.reply_to(m, "Use **Team A vs Team B** format\nTypo-proof | Instant prediction")
         return
@@ -427,24 +406,29 @@ def handle(m):
     bot.reply_to(m, '\n'.join(msg), parse_mode='Markdown')
     PENDING_MATCH[uid] = (home, away, home_cands, away_cands)
 
-# === START ===
-if __name__ == '__main__':
-    log.info("KickVision v1.0.0 STARTED — Official Release")
-    bot.infinity_polling()
-
-# === WEBHOOK MODE (ADD THIS AT THE END) ===
-from flask import Flask, request
-
+# === FLASK WEBHOOK (RENDER) ===
 app = Flask(__name__)
 
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
-    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
-    bot.process_new_updates([update])
-    return 'OK'
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return 'OK', 200
+    return 'Invalid', 403
 
+# === STARTUP ===
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+    log.info("KickVision v1.0.0 STARTED — Official Release")
+    
+    # Remove old webhook + set new one
     bot.remove_webhook()
-    bot.set_webhook(url=f"https://{os.environ['RENDER_EXTERNAL_HOSTNAME']}/{BOT_TOKEN}")
+    time.sleep(1)
+    webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}"
+    bot.set_webhook(url=webhook_url)
+    log.info(f"Webhook set: {webhook_url}")
+
+    # Run Flask (blocks forever)
+    port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
