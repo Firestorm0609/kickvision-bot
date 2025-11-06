@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 KickVision v1.0.0 — Official Release
-100-model ensemble | Typo-proof | /cancel | vs Only
+100-model ensemble | Typo-proof | /cancel | vs Only | Full League Support
 """
 
 import os
@@ -30,6 +30,7 @@ API_KEY = os.getenv("API_KEY")
 API_BASE = 'https://api.football-data.org/v4'
 ZIP_FILE = 'clubs.zip'
 CACHE_FILE = 'team_cache.json'
+LEAGUES_CACHE_FILE = 'leagues_cache.json'  # New: For all competitions
 CACHE_TTL = 86400
 SIMS_PER_MODEL = 1000
 TOTAL_MODELS = 100
@@ -42,8 +43,10 @@ log = logging.getLogger('kickvision')
 user_rate = defaultdict(list)
 TEAM_ALIASES = {}
 TEAM_CACHE = {}
+LEAGUES_CACHE = {}  # New: All available leagues/competitions
 PENDING_MATCH = {}
 
+# Old priority (fallback for league detection)
 LEAGUE_PRIORITY = {
     "UEFA Champions League": 2001,
     "Premier League": 2021,
@@ -123,6 +126,46 @@ def save_cache():
     with open(CACHE_FILE, 'w') as f:
         json.dump(TEAM_CACHE, f)
 
+def load_leagues_cache():
+    global LEAGUES_CACHE
+    if os.path.exists(LEAGUES_CACHE_FILE):
+        try:
+            with open(LEAGUES_CACHE_FILE, 'r') as f:
+                data = json.load(f)
+                now = time.time()
+                if now - data['time'] < CACHE_TTL:
+                    LEAGUES_CACHE = {int(k): v for k, v in data['leagues'].items()}
+                    log.info(f"Loaded leagues cache: {len(LEAGUES_CACHE)} competitions")
+                    return True
+        except Exception as e:
+            log.exception("Leagues cache error")
+    return False
+
+def save_leagues_cache():
+    with open(LEAGUES_CACHE_FILE, 'w') as f:
+        json.dump({'time': time.time(), 'leagues': LEAGUES_CACHE}, f)
+
+def fetch_all_leagues():
+    """Fetch all available competitions from API (144+ worldwide)"""
+    data = safe_get(f"{API_BASE}/competitions")
+    if data and 'competitions' in data:
+        for comp in data['competitions']:
+            lid = comp['id']
+            LEAGUES_CACHE[lid] = comp['name']  # Or comp['area']['name'] for country
+        save_leagues_cache()
+        log.info(f"Fetched {len(LEAGUES_CACHE)} leagues from API")
+        return True
+    log.warning("Failed to fetch leagues—using priority only")
+    return False
+
+# Load or fetch leagues
+if not load_leagues_cache():
+    fetch_all_leagues()
+
+# Fallback to priority if no leagues
+if not LEAGUES_CACHE:
+    LEAGUES_CACHE = dict(LEAGUE_PRIORITY.items())  # id: name (reversed)
+
 load_cache()
 
 # === SAFE GET ===
@@ -171,7 +214,7 @@ def get_league_teams(league_id):
 def find_team_candidates(name):
     name_resolved = resolve_alias(name)
     search_key = re.sub(r'[^a-z0-9\s]', '', name_resolved.lower())
-    leagues = list(LEAGUE_PRIORITY.values())
+    leagues = list(LEAGUES_CACHE.keys())  # Now all leagues!
     candidates = []
     
     for lid in leagues:
@@ -187,7 +230,8 @@ def find_team_candidates(name):
                 1.0 if search_key == tla.lower() else 0
             )
             if score > 0.4:
-                candidates.append((score, tname, tid, tla or tname[:3].upper(), lid))
+                league_name = LEAGUES_CACHE.get(lid, f"League {lid}")
+                candidates.append((score, tname, tid, tla or tname[:3].upper(), lid, league_name))
     
     candidates.sort(reverse=True)
     return candidates[:5]
@@ -212,17 +256,18 @@ def auto_detect_league(hid, aid):
     common = h_leagues & a_leagues
     if not common and h_leagues:
         lid = next(iter(h_leagues))
-        return lid, next((k for k, v in LEAGUE_PRIORITY.items() if v == lid), "League")
+        return lid, LEAGUES_CACHE.get(lid, "League")
     
+    # Fallback to priority order
     priority_order = list(LEAGUE_PRIORITY.values())
-    best_lid = max(common, key=lambda x: priority_order.index(x) if x in priority_order else -1)
-    return best_lid, next((k for k, v in LEAGUE_PRIORITY.items() if v == best_lid), "League")
+    best_lid = max(common, key=lambda x: priority_order.index(x) if x in priority_order else len(priority_order))
+    return best_lid, LEAGUES_CACHE.get(best_lid, "League")
 
 # === GET STATS ===
 def get_team_stats(team_id, is_home):
     cache_key = f"stats_{team_id}_{is_home}"
     if cache_key in TEAM_CACHE:
-        return TEAM_CACHE[key]['data']
+        return TEAM_CACHE[cache_key]['data']
     
     data = safe_get(f"{API_BASE}/teams/{team_id}/matches", {'status': 'FINISHED', 'limit': 10})
     if not data or not data.get('matches'):
@@ -332,14 +377,14 @@ def is_allowed(uid):
 def send_help(m):
     help_text = (
         "⚽ **How KickVision Works**\n\n"
-        "I use **100 AI models** to simulate each match **1000 times per model** — that’s **100,000 simulations**!\n\n"
+        "I use **100 AI models** to simulate each match **1000 times per model** — that's **100,000 simulations**!\n\n"
         "From real stats (last 10 games), I predict:\n"
         "• **xG** (expected goals)\n"
         "• **Win %** for Home, Draw, Away\n"
         "• **Most likely score**\n"
         "• **Final verdict**\n\n"
         "Just type: `Team A vs Team B`\n"
-        "Example: `Arsenal vs Liverpool`\n\n"
+        "Example: `Lincoln vs York` (works for minor leagues too!)\n\n"
         "Use **/cancel** to stop selection\n"
         "Use **/start** to begin"
     )
@@ -388,7 +433,7 @@ def handle(m):
     txt = re.sub(r'[|\[\](){}]', ' ', txt)
     
     if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE):
-        bot.reply_to(m, "Use **Team A vs Team B** format\nExample: `Chelsea vs Man U`\nType **/how** for details")
+        bot.reply_to(m, "Use **Team A vs Team B** format\nExample: `Lincoln vs York`\nType **/how** for details")
         return
 
     parts = re.split(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE)
@@ -399,7 +444,7 @@ def handle(m):
     away_cands = find_team_candidates(away)
 
     if not home_cands or not away_cands:
-        bot.reply_to(m, f"Not found: `{home}` or `{away}`\nTry: `Man City vs Liverpool`")
+        bot.reply_to(m, f"Couldn't find: `{home}` or `{away}` in 144+ leagues.\nTry a different spelling or example: `Man City vs Liverpool`\nType **/how** for tips")
         return
 
     if home_cands[0][0] > 0.9 and away_cands[0][0] > 0.9:
@@ -411,11 +456,11 @@ def handle(m):
 
     msg = ["**Did you mean?**"]
     msg.append(f"**Home:** {home}")
-    for i, (_, name, _, tla, _) in enumerate(home_cands, 1):
-        msg.append(f"{i}. {name} ({tla})")
+    for i, (_, name, _, tla, lid, lname) in enumerate(home_cands, 1):
+        msg.append(f"{i}. {name} ({tla}) — {lname}")
     msg.append(f"**Away:** {away}")
-    for i, (_, name, _, tla, _) in enumerate(away_cands, 1):
-        msg.append(f"{i}. {name} ({tla})")
+    for i, (_, name, _, tla, lid, lname) in enumerate(away_cands, 1):
+        msg.append(f"{i}. {name} ({tla}) — {lname}")
     msg.append("\n**Reply with two numbers**: `1 3` ← picks 1st home, 3rd away\nOr type **/cancel**")
     bot.reply_to(m, '\n'.join(msg), parse_mode='Markdown')
     PENDING_MATCH[uid] = (home, away, home_cands, away_cands)
