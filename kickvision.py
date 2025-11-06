@@ -25,8 +25,8 @@ import telebot
 from flask import Flask, request
 
 # === CONFIG ===
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8457858214:AAGLNRS3SGbrSS8--gpa3dKv07I7v2UydvQ")  # Use env var
-API_KEY = os.getenv("API_KEY", "0f89780a907f4789bc8ab382736cb62c")
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Use env var
+API_KEY = os.getenv("API_KEY")
 API_BASE = 'https://api.football-data.org/v4'
 ZIP_FILE = 'clubs.zip'
 CACHE_FILE = 'team_cache.json'
