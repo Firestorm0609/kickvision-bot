@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 KickVision v1.0.0 — Official Release
-100-model ensemble | All Leagues | Fixtures + Predictions | Bug-Free
+100-model ensemble | All Leagues | Fixtures + Predictions | Render-Ready
 """
 
 import os
@@ -38,9 +38,15 @@ CACHE_TTL = 86400
 SIMS_PER_MODEL = 1000
 TOTAL_MODELS = 100
 
-# === LOGGING ===
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+# === LOGGING (QUIET STARTUP) ===
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s: %(message)s',
+    handlers=[logging.StreamHandler()]
+)
 log = logging.getLogger('kickvision')
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("requests").setLevel(logging.WARNING)
 
 # === GLOBAL STATE ===
 user_rate = defaultdict(list)
@@ -146,7 +152,7 @@ def save_cache():
 
 load_cache()
 
-# === SAFE GET (429-RESILIENT) ===
+# === SAFE GET (SILENT 429) ===
 def safe_get(url, params=None):
     for attempt in range(3):
         try:
@@ -155,19 +161,15 @@ def safe_get(url, params=None):
                 return r.json()
             elif r.status_code == 429:
                 wait = 60 * (2 ** attempt)
-                log.warning(f"429 → sleeping {wait}s for {url}")
+                log.debug(f"429 → sleep {wait}s")
                 time.sleep(wait)
-                continue
             elif r.status_code in [403, 404]:
                 return None
             else:
-                log.warning(f"API {r.status_code}: {url}")
+                log.debug(f"API {r.status_code}")
                 return None
         except Exception as e:
-            if "429" in str(e):
-                time.sleep(60)
-            else:
-                log.exception(f"Request failed: {e}")
+            log.debug(f"Request failed: {e}")
             time.sleep(5)
     return None
 
@@ -214,7 +216,7 @@ def resolve_alias(name):
         if low in alias or alias in low: return official
     return name
 
-# === GET LEAGUE TEAMS ===
+# === GET LEAGUE TEAMS (ON-DEMAND) ===
 def get_league_teams(league_id):
     key = f"league_{league_id}"
     now = time.time()
@@ -228,23 +230,6 @@ def get_league_teams(league_id):
         save_cache()
         return teams
     return []
-
-# === PREWARM LEAGUES (SAFE + THROTTLED) ===
-def prewarm_leagues():
-    log.info("Prewarming supported leagues (throttled)...")
-    valid_lids = []
-    
-    for lid in LEAGUE_MAP.values():
-        data = safe_get(f"{API_BASE}/competitions/{lid}")
-        if not data:
-            continue
-        valid_lids.append(lid)
-        log.info(f"Validated: {LEAGUES_CACHE.get(lid, lid)} ({lid})")
-        
-        get_league_teams(lid)
-        time.sleep(1.1)  # < 1 req/sec → avoids 429
-    
-    log.info(f"Prewarmed {len(valid_lids)} leagues safely")
 
 # === FIND CANDIDATES ===
 def find_team_candidates(name):
@@ -347,7 +332,7 @@ def get_market_odds(hname, aname, lid):
                         }
         return None
     except Exception as e:
-        log.warning(f"Odds fetch error: {e}")
+        log.debug(f"Odds fetch error: {e}")
         return None
 
 # === ENSEMBLE MODEL ===
@@ -614,12 +599,10 @@ def webhook():
     return 'Invalid', 403
 
 if __name__ == '__main__':
-    log.info("KickVision v1.0.0 STARTED — Render-Ready + 429-Fixed")
+    log.info("KickVision v1.0.0 STARTED — NO PREWARM (429-PROOF)")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
-    
-    prewarm_leagues()
     
     port = int(os.environ.get('PORT', 5000))
     log.info(f"LISTENING ON PORT {port}")
