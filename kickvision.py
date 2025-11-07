@@ -334,11 +334,11 @@ def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
     if home_xg < 2.0 and away_xg < 2.0:
         tau = 1 - 0.05 * home_xg * away_xg
         home_xg *= tau; away_xg *= tau
-    ug = np.random.poisson(home_xg, SIMS_PER_MODEL)
+    hg = np.random.poisson(home_xg, SIMS_PER_MODEL)
     ag = np.random.poisson(away_xg, SIMS_PER_MODEL)
     return hg, ag
 
-def ensemble_100_models(h_g, h_ga, a_gf, a_ga):
+def ensemble_100_models(h_gf, h_ga, a_gf, a_ga):
     seeds = list(range(TOTAL_MODELS))
     all_home_goals = []
     all_away_goals = []
@@ -367,9 +367,9 @@ def ensemble_100_models(h_g, h_ga, a_gf, a_ga):
 # === VERDICT (NO BIAS) ===
 def get_verdict(model, market=None):
     h, d, a = model['home_win'], model['draw'], model['away_win']
-    if market and market['home'] and market['away']:
+    if market and market.get('home') and market.get('away'):
         mh = 1/market['home']; ma = 1/market['away']
-        md = 1/market['draw'] if market['draw'] else (mh + ma) * 0.1
+        md = 1/market['draw'] if market.get('draw') else (mh + ma) * 0.1
         total = mh + md + ma
         if total > 0:
             h = int(h * 0.7 + (mh/total*100 * 0.3))
@@ -527,7 +527,8 @@ def callback_handler(call):
     reply_to_id = call.message.message_id
 
     if call.data.startswith("cmd_/"):
-        cmd = call.data[5:]
+        # keep leading slash so comparisons like "/today" work
+        cmd = call.data[4:]
         bot.answer_callback_query(call.id)
 
         if cmd == "/today":
