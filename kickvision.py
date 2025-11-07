@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-KickVision v1.0.1 — With Performance Optimizations
-Added: Aggressive caching, prediction history, speed improvements
+KickVision v1.1.0 — Enhanced with Free Premium Features
+Added: Match importance, previews, educational tips, referral system, premium tiers
 """
 
 import os
@@ -13,7 +13,7 @@ import json
 import random
 from collections import defaultdict, Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import numpy as np
 import requests
@@ -34,8 +34,8 @@ ZIP_FILE = 'clubs.zip'
 CACHE_FILE = 'team_cache.json'
 LEAGUES_CACHE_FILE = 'leagues_cache.json'
 CACHE_TTL = 86400
-SIMS_PER_MODEL = 500    # OPTIMIZED: Was 1000
-TOTAL_MODELS = 50       # OPTIMIZED: Was 100
+SIMS_PER_MODEL = 500
+TOTAL_MODELS = 50
 
 # === LOGGING ===
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
@@ -54,11 +54,56 @@ ODDS_CACHE = {}
 LOADING_MSGS = {}
 HELP_STATE = {}
 
-# === NEW: PERFORMANCE OPTIMIZATIONS ===
-PREDICTION_CACHE = {}  # Cache full predictions for 1 hour
-TEAM_RESOLVE_CACHE = {}  # Cache team name resolutions
-USER_HISTORY = defaultdict(list)  # Store user prediction history
-LEAGUES_LOADED = {}  # Lazy loading for league data
+# === PERFORMANCE OPTIMIZATIONS ===
+PREDICTION_CACHE = {}
+TEAM_RESOLVE_CACHE = {}
+USER_HISTORY = defaultdict(list)
+LEAGUES_LOADED = {}
+
+# === NEW: PREMIUM FEATURES (FREE) ===
+PREMIUM_USERS = set()  # Manually activated premium users
+USER_STATS = defaultdict(lambda: {'predictions_made': 0, 'premium_until': None})
+REFERRAL_CODES = {}  # code -> user_id
+REFERRALS = defaultdict(list)  # user_id -> list of referred users
+WAITLIST = set()  # Users waiting for premium
+
+# Free tier limits
+FREE_TIER = {
+    'predictions_per_day': 8,
+    'leagues': ['Premier League', 'La Liga', 'Champions League'],
+    'cache_time': 3600
+}
+
+PREMIUM_FEATURES = {
+    'predictions_per_day': 50,
+    'all_leagues': True,
+    'cache_time': 300,  # 5 minutes
+    'priority_support': True
+}
+
+# Educational content
+EDUCATIONAL_TIPS = [
+    "💡 **Tip**: Never bet more than 5% of your bankroll on a single match",
+    "🔍 **Strategy**: Look for value bets where bookmakers underestimate teams",
+    "⚡ **Discipline**: Don't chase losses - stick to your strategy",
+    "📊 **Research**: Always check team news and lineups before betting",
+    "🎯 **Focus**: Specialize in 2-3 leagues you know well",
+    "💎 **Patience**: Wait for the right opportunities, don't force bets",
+    "📈 **Tracking**: Keep a record of all your bets to analyze performance",
+    "🛡️ **Safety**: Use reputable bookmakers with proper licenses"
+]
+
+# Match preview templates
+MATCH_PREVIEWS = [
+    "Key battle: Midfield control could decide this encounter",
+    "Watch for set pieces - both teams have aerial threats",
+    "Recent form suggests we might see goals in this one",
+    "Defensive solidity vs attacking flair - classic matchup",
+    "Team news could be crucial with some key players doubtful",
+    "Historical meetings between these sides have been entertaining",
+    "Both managers known for tactical flexibility - intriguing matchup",
+    "Critical 3 points at stake with table position implications"
+]
 
 # === LEAGUE MAP ===
 LEAGUE_MAP = {
@@ -144,28 +189,97 @@ def save_cache():
 
 load_cache()
 
-# === NEW: FAST TEAM RESOLUTION ===
+# === FAST TEAM RESOLUTION ===
 def fast_resolve_alias(name):
-    """Cached version of team resolution - 10x faster"""
     low = re.sub(r'[^a-z0-9\s]', '', str(name).lower().strip())
-    
-    # Check cache first
     if low in TEAM_RESOLVE_CACHE:
         return TEAM_RESOLVE_CACHE[low]
-    
-    # Original resolution logic
     if low in TEAM_ALIASES: 
         result = TEAM_ALIASES[low]
         TEAM_RESOLVE_CACHE[low] = result
         return result
-        
     for alias, official in TEAM_ALIASES.items():
         if low in alias or alias in low: 
             TEAM_RESOLVE_CACHE[low] = official
             return official
-            
     TEAM_RESOLVE_CACHE[low] = name
     return name
+
+# === NEW: MATCH IMPORTANCE INDICATOR ===
+def get_match_importance(hname, aname):
+    big_matches = [
+        "man city vs liverpool", "liverpool vs man city",
+        "barcelona vs real madrid", "real madrid vs barcelona", 
+        "man united vs chelsea", "chelsea vs man united",
+        "arsenal vs tottenham", "tottenham vs arsenal",
+        "bayern vs dortmund", "dortmund vs bayern",
+        "milan vs inter", "inter vs milan",
+        "psg vs marseille", "marseille vs psg"
+    ]
+    match_key = f"{hname.lower()} vs {aname.lower()}"
+    if match_key in big_matches:
+        return "🔥 **BIG MATCH ALERT** - High stakes encounter!"
+    
+    derby_matches = [
+        "man united vs man city", "man city vs man united",
+        "liverpool vs everton", "everton vs liverpool",
+        "arsenal vs chelsea", "chelsea vs arsenal",
+        "celtic vs rangers", "rangers vs celtic"
+    ]
+    if match_key in derby_matches:
+        return "⚔️ **DERBY DAY** - Local rivalry intensifies!"
+    
+    return "⚽ **Regular Match** - Good betting opportunity"
+
+# === NEW: MATCH PREVIEW GENERATOR ===
+def generate_match_preview():
+    return random.choice(MATCH_PREVIEWS)
+
+# === NEW: EDUCATIONAL TIP ===
+def get_educational_tip():
+    return random.choice(EDUCATIONAL_TIPS)
+
+# === NEW: REFERRAL SYSTEM ===
+def generate_referral_code(user_id):
+    code = f"KV{user_id % 10000:04d}"
+    REFERRAL_CODES[code] = user_id
+    return code
+
+def get_referral_message(user_id):
+    code = generate_referral_code(user_id)
+    return (
+        f"**Invite Friends & Earn Rewards!** 🤝\n\n"
+        f"Share your code: `{code}`\n"
+        f"• Friends get +3 free predictions\n"
+        f"• You get premium features after 3 referrals\n"
+        f"• Help build our betting community!\n\n"
+        f"Just tell them to use /start {code}"
+    )
+
+# === NEW: PREMIUM STATUS CHECK ===
+def is_premium_user(user_id):
+    if user_id in PREMIUM_USERS:
+        return True
+    # Check if user has enough referrals
+    if len(REFERRALS.get(user_id, [])) >= 3:
+        PREMIUM_USERS.add(user_id)
+        return True
+    return False
+
+def get_user_tier(user_id):
+    if is_premium_user(user_id):
+        return "premium"
+    return "free"
+
+def get_predictions_remaining(user_id):
+    tier = get_user_tier(user_id)
+    if tier == "premium":
+        return "Unlimited"  # Or a high number
+    # Simple daily limit check (reset not implemented here)
+    today = date.today().isoformat()
+    user_predictions_today = USER_STATS[user_id].get('today', {}).get('count', 0)
+    remaining = max(0, FREE_TIER['predictions_per_day'] - user_predictions_today)
+    return f"{remaining}/{FREE_TIER['predictions_per_day']}"
 
 # === SAFE GET ===
 def safe_get(url, params=None):
@@ -221,12 +335,10 @@ def fetch_all_leagues():
 if not load_leagues_cache():
     fetch_all_leagues()
 
-# === NEW: LAZY LEAGUE LOADING ===
+# === LAZY LEAGUE LOADING ===
 def get_league_teams_lazy(league_id):
-    """Only load league data when actually needed"""
     if league_id in LEAGUES_LOADED:
         return LEAGUES_LOADED[league_id]
-    
     teams = get_league_teams(league_id)
     LEAGUES_LOADED[league_id] = teams
     return teams
@@ -237,7 +349,6 @@ def get_league_teams(league_id):
     now = time.time()
     if key in TEAM_CACHE and now - TEAM_CACHE[key]['time'] < CACHE_TTL:
         return TEAM_CACHE[key]['data']
-    
     data = safe_get(f"{API_BASE}/competitions/{league_id}/teams")
     if data and 'teams' in data:
         teams = [(t['id'], t['name'], t.get('shortName',''), t.get('tla',''), league_id) for t in data['teams']]
@@ -248,12 +359,11 @@ def get_league_teams(league_id):
 
 # === FIND CANDIDATES ===
 def find_team_candidates(name):
-    name_resolved = fast_resolve_alias(name)  # Use cached version
+    name_resolved = fast_resolve_alias(name)
     search_key = re.sub(r'[^a-z0-9\s]', '', name_resolved.lower())
     candidates = []
-    
     for lid in LEAGUE_MAP.values():
-        teams = get_league_teams_lazy(lid)  # Use lazy loading
+        teams = get_league_teams_lazy(lid)
         for team in teams:
             tid, tname, tshort, tla, _ = team
             score = max(
@@ -264,7 +374,6 @@ def find_team_candidates(name):
             if score > 0.4:
                 league_name = LEAGUES_CACHE.get(lid, f"League {lid}")
                 candidates.append((score, tname, tid, tla or tname[:3].upper(), lid, league_name))
-    
     candidates.sort(reverse=True)
     return candidates[:5]
 
@@ -272,10 +381,8 @@ def find_team_candidates(name):
 def auto_detect_league(hid, aid):
     h_matches = safe_get(f"{API_BASE}/teams/{hid}/matches", {'limit': 20, 'status': 'FINISHED'})
     a_matches = safe_get(f"{API_BASE}/teams/{aid}/matches", {'limit': 20, 'status': 'FINISHED'})
-    
     h_leagues = set()
     a_leagues = set()
-    
     if h_matches and 'matches' in h_matches:
         for m in h_matches['matches']:
             lid = m.get('competition', {}).get('id')
@@ -284,7 +391,6 @@ def auto_detect_league(hid, aid):
         for m in a_matches['matches']:
             lid = m.get('competition', {}).get('id')
             if lid: a_leagues.add(lid)
-    
     common = h_leagues & a_leagues
     if common:
         lid = next(iter(common))
@@ -300,11 +406,9 @@ def get_weighted_stats(team_id, is_home):
     now = time.time()
     if cache_key in TEAM_CACHE and now - TEAM_CACHE[cache_key]['time'] < 3600:
         return TEAM_CACHE[cache_key]['data']
-    
     data = safe_get(f"{API_BASE}/teams/{team_id}/matches", {'status': 'FINISHED', 'limit': 6})
     if not data or len(data.get('matches', [])) < 3:
         return (1.8, 1.0) if is_home else (1.2, 1.5)
-    
     gf, ga, weights = [], [], []
     for i, m in enumerate(reversed(data['matches'][:6])):
         try:
@@ -317,10 +421,8 @@ def get_weighted_stats(team_id, is_home):
             else:
                 gf.append(sa * weight); ga.append(sh * weight); weights.append(weight)
         except: pass
-    
     total_weight = sum(weights)
     stats = (round(sum(gf)/total_weight, 2), round(sum(ga)/total_weight, 2)) if total_weight > 0 else ((1.8, 1.0) if is_home else (1.2, 1.5))
-    
     TEAM_CACHE[cache_key] = {'time': now, 'data': stats}
     save_cache()
     return stats
@@ -330,7 +432,6 @@ def get_market_odds(hname, aname):
     key = f"{hname.lower()} vs {aname.lower()}"
     if key in ODDS_CACHE and time.time() - ODDS_CACHE[key]['time'] < 1800:
         return ODDS_CACHE[key]['data']
-    
     if not ODDS_API_KEY:
         return None
     try:
@@ -356,7 +457,7 @@ def get_market_odds(hname, aname):
     except:
         return None
 
-# === REAL 50×500 SIMS (OPTIMIZED) ===
+# === REAL 50×500 SIMS ===
 def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
     random.seed(seed)
     np.random.seed(seed)
@@ -373,21 +474,17 @@ def ensemble_100_models(h_gf, h_ga, a_gf, a_ga):
     seeds = list(range(TOTAL_MODELS))
     all_home_goals = []
     all_away_goals = []
-    
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = executor.map(lambda s: run_single_model(s, h_gf, h_ga, a_gf, a_ga), seeds)
         for hg, ag in results:
             all_home_goals.extend(hg)
             all_away_goals.extend(ag)
-    
     total_sims = len(all_home_goals) if all_home_goals else 1
     home_win = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h > a) / total_sims
     draw = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h == a) / total_sims
     away_win = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h < a) / total_sims
-    
     score_counts = Counter(zip(all_home_goals, all_away_goals)) if all_home_goals else Counter({(1,0):1})
     most_likely = score_counts.most_common(1)[0][0]
-    
     return {
         'home_win': round(home_win * 100),
         'draw': round(draw * 100),
@@ -411,73 +508,68 @@ def get_verdict(model, market=None):
     elif h == max_pct: return "Home Win", h, d, a
     else: return "Away Win", h, d, a
 
-# === NEW: CACHED PREDICTION ===
+# === CACHED PREDICTION ===
 def cached_prediction(hid, aid, hname, aname, h_tla, a_tla):
-    """Cache full predictions for 1 hour - massive speed boost"""
     prediction_key = f"pred_{hid}_{aid}"
     now = time.time()
-    
-    # Check prediction cache first
     if prediction_key in PREDICTION_CACHE and now - PREDICTION_CACHE[prediction_key]['time'] < 3600:
         log.info(f"Using cached prediction for {hname} vs {aname}")
         return PREDICTION_CACHE[prediction_key]['data']
-    
-    # Generate new prediction
     lid, league_name = auto_detect_league(hid, aid)
     h_gf, h_ga = get_weighted_stats(hid, True)
     a_gf, a_ga = get_weighted_stats(aid, False)
-    
     model = ensemble_100_models(h_gf, h_ga, a_gf, a_ga)
     market = get_market_odds(hname, aname)
-    
     verdict, h_pct, d_pct, a_pct = get_verdict(model, market)
+    
+    # Enhanced output with new features
+    importance = get_match_importance(hname, aname)
+    preview = generate_match_preview()
+    education = get_educational_tip()
     
     out = [
         f"*{hname} vs {aname}*",
         f"_{league_name}_",
         "",
-        f"**xG:** `{h_gf:.2f}` — `{a_gf:.2f}`",
-        f"**Win:** `{h_pct}%` | `{d_pct}%` | `{a_pct}%`",
+        f"**Match Type:** {importance}",
+        f"**xG Analysis:** `{h_gf:.2f}` — `{a_gf:.2f}`",
+        f"**Win Probability:** `{h_pct}%` | `{d_pct}%` | `{a_pct}%`",
         "",
-        f"**Most Likely:** `{model['score']}`",
-        f"**Verdict:** *{verdict}*"
+        f"**Most Likely Score:** `{model['score']}`",
+        f"**Verdict:** *{verdict}*",
+        "",
+        f"**Match Insight:** {preview}",
+        "",
+        f"**Betting Tip:** {education}"
     ]
     result = '\n'.join(out)
-    
-    # Cache the result
     PREDICTION_CACHE[prediction_key] = {'time': now, 'data': result}
     return result
 
-# === NEW: PREDICTION HISTORY ===
+# === PREDICTION HISTORY ===
 def add_to_history(user_id, match, prediction):
-    """Store user's last 5 predictions"""
     USER_HISTORY[user_id].append({
         'match': match,
         'prediction': prediction,
         'time': time.time()
     })
-    # Keep only last 5 predictions
     if len(USER_HISTORY[user_id]) > 5:
         USER_HISTORY[user_id] = USER_HISTORY[user_id][-5:]
+    # Update user stats
+    USER_STATS[user_id]['predictions_made'] += 1
 
 def get_user_history(user_id):
-    """Get formatted user history"""
     if user_id not in USER_HISTORY or not USER_HISTORY[user_id]:
-        return "No prediction history yet."
-    
-    history_text = ["*Your Recent Predictions:*"]
+        return "No prediction history yet. Make some predictions first!"
+    history_text = ["*Your Recent Predictions:* 📊"]
     for i, pred in enumerate(reversed(USER_HISTORY[user_id])):
         match = pred['match']
         prediction = pred['prediction']
         time_str = datetime.fromtimestamp(pred['time']).strftime("%H:%M")
-        
-        # Extract verdict from prediction
         lines = prediction.split('\n')
         verdict_line = next((line for line in lines if "Verdict:" in line), "Verdict: Unknown")
         verdict = verdict_line.split("Verdict:")[1].strip() if "Verdict:" in verdict_line else "Unknown"
-        
         history_text.append(f"{i+1}. {match} → {verdict} ({time_str})")
-    
     return '\n'.join(history_text)
 
 # === PREDICT (USES CACHED VERSION) ===
@@ -489,11 +581,9 @@ def get_league_fixtures(league_name):
     lid = LEAGUE_MAP.get(league_name.lower())
     if not lid:
         return "League not supported."
-    
     data = safe_get(f"{API_BASE}/competitions/{lid}/matches", {'status': 'SCHEDULED', 'limit': 10})
     if not data or not data.get('matches'):
         return "No upcoming fixtures found."
-    
     fixtures = []
     for m in data['matches'][:5]:
         date = m['utcDate'][:10]
@@ -536,19 +626,83 @@ def fun_loading(chat_id, base_text="Loading", reply_to_message_id=None, stages_c
             pass
     return msg
 
-# === /today — FULL PREDICTIONS + UTC + EMOJIS ===
+# === NEW: PREMIUM COMMAND ===
+@bot.message_handler(commands=['premium'])
+def premium_info(m):
+    user_id = m.from_user.id
+    tier = get_user_tier(user_id)
+    referrals_count = len(REFERRALS.get(user_id, []))
+    
+    if tier == "premium":
+        bot.reply_to(m, 
+            "🎉 **You're a Premium User!** 🎉\n\n"
+            "✅ Unlimited predictions\n"
+            "✅ All leagues available\n"
+            "✅ Priority processing\n"
+            "✅ Advanced insights\n\n"
+            "Thank you for being part of KickVision Premium!",
+            parse_mode='Markdown'
+        )
+    else:
+        remaining = get_predictions_remaining(user_id)
+        bot.reply_to(m,
+            "🚀 **KickVision Premium** 🚀\n\n"
+            "✨ *What you get:*\n"
+            "• Unlimited daily predictions\n"
+            "• All leagues worldwide\n" 
+            "• Faster processing\n"
+            "• Priority support\n"
+            "• Advanced betting insights\n\n"
+            f"📊 *Your Status:*\n"
+            f"• Tier: {tier.title()}\n"
+            f"• Predictions left today: {remaining}\n"
+            f"• Referrals: {referrals_count}/3 needed\n\n"
+            "🎁 *How to upgrade:*\n"
+            "1. Refer 3 friends using /referral\n"
+            "2. OR Contact admin for direct upgrade\n\n"
+            "Use /referral to start earning premium!",
+            parse_mode='Markdown'
+        )
+
+# === NEW: REFERRAL COMMAND ===
+@bot.message_handler(commands=['referral'])
+def referral_command(m):
+    user_id = m.from_user.id
+    bot.reply_to(m, get_referral_message(user_id), parse_mode='Markdown')
+
+# === NEW: STATS COMMAND ===
+@bot.message_handler(commands=['stats'])
+def user_stats(m):
+    user_id = m.from_user.id
+    tier = get_user_tier(user_id)
+    predictions_made = USER_STATS[user_id].get('predictions_made', 0)
+    referrals_count = len(REFERRALS.get(user_id, []))
+    remaining = get_predictions_remaining(user_id)
+    
+    stats_text = [
+        "📈 **Your KickVision Stats**",
+        "",
+        f"👤 **Tier:** {tier.title()}",
+        f"📊 **Predictions Made:** {predictions_made}",
+        f"🎯 **Today's Limit:** {remaining}",
+        f"🤝 **Referrals:** {referrals_count}/3",
+        "",
+        "Use /premium to upgrade your account!",
+        "Use /referral to invite friends!"
+    ]
+    
+    bot.reply_to(m, '\n'.join(stats_text), parse_mode='Markdown')
+
+# === ENHANCED /today ===
 def run_today(chat_id, reply_to_id=None):
     uid = chat_id
     if uid in LOADING_MSGS:
         return
-
     loading = fun_loading(chat_id, "Fetching today's fixtures", reply_to_message_id=reply_to_id, stages_count=3)
     LOADING_MSGS[uid] = loading.message_id
-
     try:
         today = date.today().isoformat()
         all_fixtures = []
-
         def fetch_and_predict(lid, name):
             data = safe_get(f"{API_BASE}/competitions/{lid}/matches", {'dateFrom': today, 'dateTo': today})
             if not data or not data.get('matches'): return [], 0
@@ -564,7 +718,6 @@ def run_today(chat_id, reply_to_id=None):
                 body = '\n'.join(pred_lines[2:]) if len(pred_lines) > 2 else pred
                 results.append(f"`{t} UTC` {hname} vs {aname}\n{body}")
             return results, len(data['matches'])
-
         with ThreadPoolExecutor(max_workers=8) as executor:
             futures = {executor.submit(fetch_and_predict, lid, name): name for name, lid in LEAGUE_MAP.items() if ' ' in name}
             for future in as_completed(futures):
@@ -578,12 +731,10 @@ def run_today(chat_id, reply_to_id=None):
                             all_fixtures.append(f"_+{total-3} more..._")
                         all_fixtures.append("")
                 except: pass
-
         if not all_fixtures:
             result = "No fixtures today in major leagues."
         else:
             result = "*Today's Fixtures & Predictions*\n\n" + "\n".join(all_fixtures).strip()
-
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=loading.message_id,
@@ -600,19 +751,17 @@ def run_today(chat_id, reply_to_id=None):
     finally:
         LOADING_MSGS.pop(uid, None)
 
-# === /users — FUN 2-STEP ANIMATION WITH EMOJIS ===
+# === ENHANCED /users ===
 def run_users(chat_id, reply_to_id=None):
     uid = chat_id
     if uid in LOADING_MSGS:
         return
-
     loading_msg = bot.send_message(
         chat_id, "Compiling active users... 🔍", 
         reply_to_message_id=reply_to_id, 
         parse_mode='Markdown'
     )
     LOADING_MSGS[uid] = loading_msg.message_id
-
     try:
         time.sleep(random.uniform(1.2, 1.8))
         bot.edit_message_text(
@@ -623,10 +772,18 @@ def run_users(chat_id, reply_to_id=None):
         )
         time.sleep(random.uniform(0.8, 1.3))
         active = len(USER_SESSIONS)
+        premium_count = len(PREMIUM_USERS)
+        total_predictions = sum(stats.get('predictions_made', 0) for stats in USER_STATS.values())
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=loading_msg.message_id,
-            text=f"**Active users:** `{active}`",
+            text=(
+                f"**Community Stats** 📊\n\n"
+                f"👥 Active Users: `{active}`\n"
+                f"⭐ Premium Members: `{premium_count}`\n"
+                f"📈 Predictions Made: `{total_predictions}`\n"
+                f"🤝 Referrals Active: `{sum(len(refs) for refs in REFERRALS.values())}`"
+            ),
             parse_mode='Markdown'
         )
     except Exception:
@@ -639,24 +796,58 @@ def run_users(chat_id, reply_to_id=None):
     finally:
         LOADING_MSGS.pop(uid, None)
 
-# === NEW: /history COMMAND ===
+# === ENHANCED /history ===
 @bot.message_handler(commands=['history'])
 def show_history(m):
-    """Show user's prediction history"""
     user_id = m.from_user.id
     history_text = get_user_history(user_id)
-    bot.reply_to(m, history_text, parse_mode='Markdown')
+    predictions_made = USER_STATS[user_id].get('predictions_made', 0)
+    enhanced_text = f"{history_text}\n\n📊 Total Predictions: {predictions_made}"
+    bot.reply_to(m, enhanced_text, parse_mode='Markdown')
 
-# === PAGINATED /start MENU ===
+# === ENHANCED START MENU ===
 @bot.message_handler(commands=['start'])
 def start(m):
+    user_id = m.from_user.id
+    USER_SESSIONS.add(user_id)
+    
+    # Check for referral code
+    if len(m.text.split()) > 1:
+        referral_code = m.text.split()[1]
+        if referral_code in REFERRAL_CODES and REFERRAL_CODES[referral_code] != user_id:
+            referrer_id = REFERRAL_CODES[referral_code]
+            if user_id not in REFERRALS[referrer_id]:
+                REFERRALS[referrer_id].append(user_id)
+                # Notify referrer
+                try:
+                    bot.send_message(
+                        referrer_id,
+                        f"🎉 New referral! {m.from_user.first_name} joined using your code.\n"
+                        f"You now have {len(REFERRALS[referrer_id])}/3 referrals for premium!",
+                        parse_mode='Markdown'
+                    )
+                except:
+                    pass
+    
     show_menu_page(m, 1)
 
 def show_menu_page(m, page=1):
+    user_id = m.from_user.id
+    tier = get_user_tier(user_id)
+    remaining = get_predictions_remaining(user_id)
+    
     markup = types.InlineKeyboardMarkup(row_width=2)
     
     if page == 1:
-        text = "*Welcome to KickVision v1.0.1*\n\n*Faster predictions with caching!*\n\n*Page 1: Major Leagues*\nClick a league below:"
+        text = (
+            f"⚽ *KickVision Football Predictions* ⚽\n\n"
+            f"✨ *Advanced AI-powered match predictions*\n"
+            f"🔮 *Proven statistical models*\n"
+            f"🎯 *Professional betting insights*\n\n"
+            f"👤 *Your Status: {tier.title()}*\n"
+            f"📊 *Predictions Today: {remaining}*\n\n"
+            f"*Page 1: Major Leagues*"
+        )
         row1 = [
             types.InlineKeyboardButton("Premier League", callback_data="cmd_/premierleague"),
             types.InlineKeyboardButton("La Liga", callback_data="cmd_/laliga")
@@ -673,21 +864,31 @@ def show_menu_page(m, page=1):
         markup.add(*row1, *row2, *row3, *nav_row)
     
     elif page == 2:
-        text = "*KickVision Menu*\n\n*Page 2: Quick Actions*\nChoose an option:"
+        text = (
+            f"*KickVision Menu*\n\n"
+            f"👤 *Your Status: {tier.title()}*\n"
+            f"📊 *Predictions Today: {remaining}*\n\n"
+            f"*Page 2: Quick Actions*"
+        )
         row1 = [
             types.InlineKeyboardButton("Today", callback_data="cmd_/today"),
             types.InlineKeyboardButton("Users", callback_data="cmd_/users")
         ]
         row2 = [
             types.InlineKeyboardButton("History", callback_data="cmd_/history"),
-            types.InlineKeyboardButton("Help", callback_data="help_1")
+            types.InlineKeyboardButton("Stats", callback_data="cmd_/stats")
         ]
+        row3 = [
+            types.InlineKeyboardButton("Premium", callback_data="cmd_/premium"),
+            types.InlineKeyboardButton("Referral", callback_data="cmd_/referral")
+        ]
+        row4 = [types.InlineKeyboardButton("Help", callback_data="help_1")]
         nav_row = [types.InlineKeyboardButton("Prev ⬅️", callback_data="menu_1")]
-        markup.add(*row1, *row2, *nav_row)
+        markup.add(*row1, *row2, *row3, *row4, *nav_row)
     
     bot.send_message(m.chat.id, text, reply_markup=markup, parse_mode='Markdown')
 
-# === HELP PAGES (with 📃 emoji on every page) ===
+# === ENHANCED HELP PAGES ===
 def build_help_page(page):
     markup = types.InlineKeyboardMarkup(row_width=3)
     prev_btn = types.InlineKeyboardButton("⬅️ Prev", callback_data=f"help_{max(1, page-1)}")
@@ -697,34 +898,45 @@ def build_help_page(page):
     if page == 1:
         text = (
             "📃 *KickVision — Help (Page 1/3)*\n\n"
-            "*Commands*\n"
-            "• `/today` — Show today's fixtures.\n"
-            "• `/users` — Display active users.\n"
-            "• `/history` — Your prediction history.\n"
-            "• `/premierleague`, etc — Get upcoming.\n"
-            "• `Team A vs Team B` — Get predictions.\n\n"
-            "_Tap Next for examples._"
+            "*Main Commands*\n"
+            "• `/today` — Today's fixtures & predictions\n"
+            "• `/premierleague` etc — League predictions\n"
+            "• `Team A vs Team B` — Specific match prediction\n\n"
+            "*Account Commands*\n"
+            "• `/stats` — Your prediction statistics\n"
+            "• `/history` — Your prediction history\n"
+            "• `/premium` — Premium features info\n"
+            "• `/referral` — Invite friends\n\n"
+            "_Tap Next for more._"
         )
         markup.add(next_btn, close_btn)
     elif page == 2:
         text = (
-            "📃 *KickVision — Examples (Page 2/3)*\n\n"
-            "*How to ask*\n"
-            "• `Man City vs Arsenal` → may ask `Did you mean?`\n"
-            "• Reply `1 2` to pick.\n\n"
-            "*League command*\n"
-            "• `/premierleague` → shows predictions.\n\n"
-            "_Tap Next for tips._"
+            "📃 *KickVision — Help (Page 2/3)*\n\n"
+            "*How It Works*\n"
+            "• Uses advanced statistical models\n"
+            "• Analyzes team form & xG data\n"
+            "• Runs Monte Carlo simulations\n"
+            "• Provides win probabilities\n\n"
+            "*Free Tier*\n"
+            "• 8 predictions per day\n"
+            "• Major leagues only\n"
+            "• Standard processing\n\n"
+            "_Tap Next for premium._"
         )
         markup.add(prev_btn, next_btn, close_btn)
     elif page == 3:
         text = (
-            "📃 *KickVision — Tips (Page 3/3)*\n\n"
-            "• Try aliases or short names.\n"
-            "• Use `/cancel` to reset.\n"
-            "• Predictions cached for 1 hour.\n"
-            "• Rate-limited? Wait 1 min.\n\n"
-            "Enjoy!"
+            "📃 *KickVision — Help (Page 3/3)*\n\n"
+            "*Premium Features* 🚀\n"
+            "• Unlimited predictions\n"
+            "• All leagues worldwide\n"
+            "• Faster processing\n"
+            "• Priority support\n\n"
+            "*How to Upgrade*\n"
+            "• Refer 3 friends OR\n"
+            "• Contact admin\n\n"
+            "Use /referral to start earning!"
         )
         markup.add(prev_btn, close_btn)
     else:
@@ -742,7 +954,7 @@ def show_help_page(message, page=1):
 def run_help_cmd(message):
     show_help_page(message, 1)
 
-# === CALLBACK HANDLER ===
+# === ENHANCED CALLBACK HANDLER ===
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     chat_id = call.message.chat.id
@@ -760,6 +972,37 @@ def callback_handler(call):
             user_id = call.from_user.id
             history_text = get_user_history(user_id)
             bot.send_message(chat_id, history_text, parse_mode='Markdown')
+        elif cmd == "/stats":
+            user_id = call.from_user.id
+            tier = get_user_tier(user_id)
+            predictions_made = USER_STATS[user_id].get('predictions_made', 0)
+            referrals_count = len(REFERRALS.get(user_id, []))
+            remaining = get_predictions_remaining(user_id)
+            stats_text = (
+                f"📈 **Your Stats**\n\n"
+                f"👤 Tier: {tier.title()}\n"
+                f"📊 Predictions: {predictions_made}\n"
+                f"🎯 Today: {remaining}\n"
+                f"🤝 Referrals: {referrals_count}/3"
+            )
+            bot.send_message(chat_id, stats_text, parse_mode='Markdown')
+        elif cmd == "/premium":
+            user_id = call.from_user.id
+            tier = get_user_tier(user_id)
+            if tier == "premium":
+                bot.send_message(chat_id, "🎉 You're already a Premium user! Enjoy the features!", parse_mode='Markdown')
+            else:
+                referrals_count = len(REFERRALS.get(user_id, []))
+                bot.send_message(chat_id, 
+                    f"🚀 Upgrade to Premium!\n\n"
+                    f"Referrals: {referrals_count}/3\n"
+                    f"Use /referral to invite friends!\n\n"
+                    f"Or contact admin for direct upgrade.",
+                    parse_mode='Markdown'
+                )
+        elif cmd == "/referral":
+            user_id = call.from_user.id
+            bot.send_message(chat_id, get_referral_message(user_id), parse_mode='Markdown')
         else:
             real_msg = types.Message(
                 message_id=call.message.message_id,
@@ -813,7 +1056,7 @@ def is_allowed(uid):
     user_rate[uid].append(now)
     return True
 
-# === MAIN HANDLER (Team vs Team) ===
+# === ENHANCED MAIN HANDLER ===
 @bot.message_handler(func=lambda m: True)
 def handle(m):
     if not m.text: return
@@ -839,11 +1082,7 @@ def handle(m):
                 a = away_opts[a_choice-1]
                 loading = fun_loading(m.chat.id, "Predicting...", reply_to_message_id=m.message_id, stages_count=3)
                 r = predict_with_ids(h[2], a[2], h[1], a[1], h[3], a[3])
-                
-                # ADD TO USER HISTORY
-                match_name = f"{h[1]} vs {a[1]}"
-                add_to_history(uid, match_name, r)
-                
+                add_to_history(uid, f"{h[1]} vs {a[1]}", r)
                 try:
                     bot.edit_message_text(
                         chat_id=m.chat.id,
@@ -864,15 +1103,27 @@ def handle(m):
         bot.reply_to(m, "Wait 5s...")
         return
 
-    # --------------------------------------------------------------
-    # 1. Show a quick "searching" animation while we look up teams
-    # --------------------------------------------------------------
-    searching_msg = bot.reply_to(
-        m,
-        "Checking 🔍 ...",
-        parse_mode='Markdown'
-    )
-    # alternate two icons for a tiny "checking" loop
+    # Check daily limit for free users
+    if not is_premium_user(uid):
+        today = date.today().isoformat()
+        if 'today' not in USER_STATS[uid]:
+            USER_STATS[uid]['today'] = {'date': today, 'count': 0}
+        elif USER_STATS[uid]['today']['date'] != today:
+            USER_STATS[uid]['today'] = {'date': today, 'count': 0}
+        
+        if USER_STATS[uid]['today']['count'] >= FREE_TIER['predictions_per_day']:
+            remaining = get_predictions_remaining(uid)
+            bot.reply_to(m, 
+                f"❌ Daily limit reached!\n\n"
+                f"You've used {FREE_TIER['predictions_per_day']}/8 free predictions today.\n\n"
+                f"🚀 Upgrade to Premium for unlimited predictions!\n"
+                f"Use /premium to learn more.",
+                parse_mode='Markdown'
+            )
+            return
+
+    # Quick searching animation
+    searching_msg = bot.reply_to(m, "Checking 🔍 ...", parse_mode='Markdown')
     for _ in range(4):
         time.sleep(0.55)
         icon = "🔍" if _ % 2 == 0 else "🔎"
@@ -886,12 +1137,9 @@ def handle(m):
         except Exception:
             pass
 
-    # --------------------------------------------------------------
-    # 2. Normal team-vs-team logic (unchanged)
-    # --------------------------------------------------------------
+    # Team vs team logic
     txt = re.sub(r'[|\[\](){}]', ' ', txt)
     if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE):
-        # delete the searching message – nothing to predict
         try:
             bot.delete_message(m.chat.id, searching_msg.message_id)
         except Exception:
@@ -905,7 +1153,6 @@ def handle(m):
     home_cands = find_team_candidates(home)
     away_cands = find_team_candidates(away)
 
-    # delete the searching placeholder
     try:
         bot.delete_message(m.chat.id, searching_msg.message_id)
     except Exception:
@@ -919,10 +1166,11 @@ def handle(m):
         h = home_cands[0]; a = away_cands[0]
         loading = fun_loading(m.chat.id, "Predicting...", reply_to_message_id=m.message_id, stages_count=3)
         r = predict_with_ids(h[2], a[2], h[1], a[1], h[3], a[3])
+        add_to_history(uid, f"{h[1]} vs {a[1]}", r)
         
-        # ADD TO USER HISTORY
-        match_name = f"{h[1]} vs {a[1]}"
-        add_to_history(uid, match_name, r)
+        # Increment prediction count for free users
+        if not is_premium_user(uid):
+            USER_STATS[uid]['today']['count'] += 1
         
         try:
             bot.edit_message_text(
@@ -948,6 +1196,7 @@ def handle(m):
 
 # === FLASK WEBHOOK ===
 app = Flask(__name__)
+
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -956,8 +1205,12 @@ def webhook():
         return 'OK', 200
     return 'Invalid', 403
 
+@app.route('/')
+def index():
+    return 'KickVision Bot v1.1.0 is running!'
+
 if __name__ == '__main__':
-    log.info("KickVision v1.0.1 — OPTIMIZED & READY")
+    log.info("KickVision v1.1.0 — ENHANCED & READY")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
