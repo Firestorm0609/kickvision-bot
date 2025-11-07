@@ -430,15 +430,15 @@ def get_league_fixtures(league_name):
 # === FUN LOADING ANIMATIONS ===
 def fun_loading(chat_id, base_text="Loading", reply_to_message_id=None, stages_count=3):
     stages = [
-        "Loading data [gear]",
-        "Analyzing formations [brain]",
-        "Crunching xG stats [bar chart]",
-        "Poisson digging [magnifying glass]",
-        "Hold my beer [beer mug]",
-        "Running Monte Carlo chaos [game die]",
-        "Calibrating models [robot]",
-        "Almost there… [lightning]",
-        "Finalizing predictions [game die]"
+        "Loading data ⚙️",
+        "Analyzing formations 🧠",
+        "Crunching xG stats 📊",
+        "Poisson digging 🔍",
+        "Hold my beer 🍺",
+        "Running Monte Carlo chaos 🎲",
+        "Calibrating models 🤖",
+        "Almost there… ⚡",
+        "Finalizing predictions 🎲"
     ]
     random.shuffle(stages)
     try:
@@ -527,7 +527,7 @@ def run_users(chat_id, reply_to_id=None):
         return
 
     loading_msg = bot.send_message(
-        chat_id, "Compiling active users... [magnifying glass]", 
+        chat_id, "Compiling active users... 🔍", 
         reply_to_message_id=reply_to_id, 
         parse_mode='Markdown'
     )
@@ -538,7 +538,7 @@ def run_users(chat_id, reply_to_id=None):
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=loading_msg.message_id,
-            text="Hold my beer [beer mug]",
+            text="Hold my beer 🍺",
             parse_mode='Markdown'
         )
         time.sleep(random.uniform(0.8, 1.3))
@@ -581,7 +581,7 @@ def show_menu_page(m, page=1):
             types.InlineKeyboardButton("Ligue 1", callback_data="cmd_/ligue1"),
             types.InlineKeyboardButton("Champions", callback_data="cmd_/champions")
         ]
-        nav_row = [types.InlineKeyboardButton("Next [right arrow]", callback_data="menu_2")]
+        nav_row = [types.InlineKeyboardButton("Next ➡️", callback_data="menu_2")]
         markup.add(*row1, *row2, *row3, *nav_row)
     
     elif page == 2:
@@ -591,21 +591,21 @@ def show_menu_page(m, page=1):
             types.InlineKeyboardButton("Users", callback_data="cmd_/users")
         ]
         row2 = [types.InlineKeyboardButton("Help", callback_data="help_1")]
-        nav_row = [types.InlineKeyboardButton("Prev [left arrow]", callback_data="menu_1")]
+        nav_row = [types.InlineKeyboardButton("Prev ⬅️", callback_data="menu_1")]
         markup.add(*row1, *row2, *nav_row)
     
     bot.send_message(m.chat.id, text, reply_markup=markup, parse_mode='Markdown')
 
-# === HELP PAGES (with page emoji on every page) ===
+# === HELP PAGES (with 📃 emoji on every page) ===
 def build_help_page(page):
     markup = types.InlineKeyboardMarkup(row_width=3)
-    prev_btn = types.InlineKeyboardButton("[left arrow] Prev", callback_data=f"help_{max(1, page-1)}")
-    next_btn = types.InlineKeyboardButton("Next [right arrow]", callback_data=f"help_{page+1}")
+    prev_btn = types.InlineKeyboardButton("⬅️ Prev", callback_data=f"help_{max(1, page-1)}")
+    next_btn = types.InlineKeyboardButton("Next ➡️", callback_data=f"help_{page+1}")
     close_btn = types.InlineKeyboardButton("Close", callback_data="menu_2")
     
     if page == 1:
         text = (
-            "*KickVision — Help (Page 1/3)*\n\n"
+            "📃 *KickVision — Help (Page 1/3)*\n\n"
             "*Commands*\n"
             "• `/today` — Show today's fixtures.\n"
             "• `/users` — Display active users.\n"
@@ -616,7 +616,7 @@ def build_help_page(page):
         markup.add(next_btn, close_btn)
     elif page == 2:
         text = (
-            "*KickVision — Examples (Page 2/3)*\n\n"
+            "📃 *KickVision — Examples (Page 2/3)*\n\n"
             "*How to ask*\n"
             "• `Man City vs Arsenal` → may ask `Did you mean?`\n"
             "• Reply `1 2` to pick.\n\n"
@@ -627,7 +627,7 @@ def build_help_page(page):
         markup.add(prev_btn, next_btn, close_btn)
     elif page == 3:
         text = (
-            "*KickVision — Tips (Page 3/3)*\n\n"
+            "📃 *KickVision — Tips (Page 3/3)*\n\n"
             "• Try aliases or short names.\n"
             "• Use `/cancel` to reset.\n"
             "• Rate-limited? Wait 1 min.\n\n"
@@ -767,13 +767,13 @@ def handle(m):
     # --------------------------------------------------------------
     searching_msg = bot.reply_to(
         m,
-        "Checking [magnifying glass] ...",
+        "Checking 🔍 ...",
         parse_mode='Markdown'
     )
     # alternate two icons for a tiny “checking” loop
     for _ in range(4):
         time.sleep(0.55)
-        icon = "[magnifying glass]" if _ % 2 == 0 else "[magnifying glass]"
+        icon = "🔍" if _ % 2 == 0 else "🔎"
         try:
             bot.edit_message_text(
                 chat_id=m.chat.id,
