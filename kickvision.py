@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-KickVision v1.0.1 — FINAL + BUGFIXES
-Clickable Today | /users = total unique users | Real draws | 5+ goals
+KickVision v1.0.2 — FINAL + BUGFIX
+Clickable Today WORKS | /users = total unique users | Real draws | 5+ goals
 """
 
 import os
@@ -74,7 +74,7 @@ def save_total_users(users_set):
     except Exception as e:
         log.warning(f"Failed to save {TOTAL_USERS_DB}: {e}")
 
-TOTAL_USERS = load_total_users()  # Persistent total unique users
+TOTAL_USERS = load_total_users()
 
 # === LEAGUE MAP ===
 LEAGUE_MAP = {
@@ -376,7 +376,6 @@ def ensemble_100_models(h_gf, h_ga, a_gf, a_ga):
     draw = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h == a) / total_sims
     away_win = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h < a) / total_sims
     
-    # Most likely score
     score_counts = Counter(zip(all_home_goals, all_away_goals))
     most_likely = score_counts.most_common(1)[0][0]
     
@@ -524,20 +523,20 @@ def start(m):
         types.InlineKeyboardButton("Help", callback_data="help_1")
     ]
     markup.add(*row1, *row2, *row3, *row4)
-    bot.send_message(m.chat.id, "*Welcome to KickVision v1.0.1*\n\nClick a league below:", reply_markup=markup, parse_mode='Markdown')
+    bot.send_message(m.chat.id, "*Welcome to KickVision v1.0.2*\n\nClick a league below:", reply_markup=markup, parse_mode='Markdown')
 
-# === CALLBACK HANDLER — FIXED: Today button works ===
+# === CALLBACK HANDLER — FIXED: Today button now works ===
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     if call.data.startswith("cmd_/"):
         cmd = call.data[5:]
         bot.answer_callback_query(call.id)
 
-        # Build a REAL Message with current date
+        # REAL Message with current timestamp
         real_msg = types.Message(
             message_id=call.message.message_id,
             from_user=call.from_user,
-            date=datetime.now(),  # Critical fix
+            date=datetime.now(),  # REQUIRED FOR reply_to()
             chat=call.message.chat,
             content_type='text',
             options=[],
@@ -644,7 +643,7 @@ def is_allowed(uid):
     user_rate[uid].append(now)
     return True
 
-# === /users — FIXED: Shows total unique users ever ===
+# === /users — Shows total unique users ever ===
 @bot.message_handler(commands=['users'])
 def users_cmd(m):
     total = len(TOTAL_USERS)
@@ -657,10 +656,9 @@ def handle(m):
     uid = m.from_user.id
     txt = m.text.strip()
 
-    # === PERSISTENT USER TRACKING ===
+    # Track user
     TOTAL_USERS.add(uid)
     save_total_users(TOTAL_USERS)
-
     USER_SESSIONS.add(uid)
 
     if txt.strip().lower() == '/cancel':
@@ -746,7 +744,7 @@ def webhook():
     return 'Invalid', 403
 
 if __name__ == '__main__':
-    log.info("KickVision v1.0.1 — Clickable Today + Total Users Fixed")
+    log.info("KickVision v1.0.2 — Clickable Today FIXED + Total Users")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
