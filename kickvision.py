@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-KickVision v1.0.5 — FINAL FIXED
+KickVision v1.0.0 — FINAL FIXED
 Today & Users buttons WORK | No reply_to() in callbacks | Indentation fixed
-Added: paginated /help, animated loading stages, duplicate fixture name fix
 """
 
 import os
@@ -53,7 +52,7 @@ PENDING_MATCH = {}
 USER_SESSIONS = set()
 ODDS_CACHE = {}
 LOADING_MSGS = {}
-HELP_STATE = {}  # can store per-chat help page if needed
+HELP_STATE = {}
 
 # === LEAGUE MAP ===
 LEAGUE_MAP = {
@@ -350,12 +349,12 @@ def ensemble_100_models(h_gf, h_ga, a_gf, a_ga):
             all_home_goals.extend(hg)
             all_away_goals.extend(ag)
     
-    total_sims = len(all_home_goals) if all_home_goals else 1
+    total_sims = len(all_home_goals)
     home_win = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h > a) / total_sims
     draw = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h == a) / total_sims
     away_win = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h < a) / total_sims
     
-    score_counts = Counter(zip(all_home_goals, all_away_goals)) if all_home_goals else Counter({(1,0):1})
+    score_counts = Counter(zip(all_home_goals, all_away_goals))
     most_likely = score_counts.most_common(1)[0][0]
     
     return {
@@ -416,61 +415,28 @@ def get_league_fixtures(league_name):
     
     fixtures = []
     for m in data['matches'][:5]:
-        date = m['utcDate'][:10]
+        date_str = m['utcDate'][:10]
         home = m['homeTeam']['name']
         away = m['awayTeam']['name']
         hid = m['homeTeam']['id']
         aid = m['awayTeam']['id']
         pred = predict_with_ids(hid, aid, home, away, '', '')
-        # pred begins with "*Home vs Away*" and league line — avoid duplicating that header
-        pred_lines = pred.splitlines()
-        # remove the first two header lines if present
-        body = '\n'.join(pred_lines[2:]) if len(pred_lines) > 2 else pred
-        fixtures.append(f"*{date}*\n{home} vs {away}\n{body}")
+        fixtures.append(f"*{date_str}*\n{home} vs {away}\n{pred}")
     return '\n\n'.join(fixtures)
 
-# === FUN LOADING ANIMATIONS (single message that animates) ===
-def fun_loading(chat_id, base_text="Loading", reply_to_message_id=None, stages_count=3):
-    """
-    Sends one message, edits it a few times with fun stages, and returns the sent message.
-    reply_to_message_id optional — pass to reply to a user message.
-    """
-    stages = [
-        "Loading data ⚙️",
-        "Analyzing formations 🧠",
-        "Crunching xG stats 📊",
-        "Poisson digging 🔢",
-        "Hold my beer 🍺",
-        "Running Monte Carlo chaos 🧮",
-        "Calibrating models 🤖",
-        "Almost there… ⚡",
-        "Finalizing predictions 🧮"
-    ]
-    random.shuffle(stages)
-    try:
-        if reply_to_message_id:
-            msg = bot.send_message(chat_id, f"{base_text}...", reply_to_message_id=reply_to_message_id, parse_mode='Markdown')
-        else:
-            msg = bot.send_message(chat_id, f"{base_text}...", parse_mode='Markdown')
-    except Exception:
-        # fallback: send without reply
-        msg = bot.send_message(chat_id, f"{base_text}...", parse_mode='Markdown')
-    # animate in the same message (stages_count random stages)
-    for stage in stages[:stages_count]:
-        time.sleep(random.uniform(0.9, 1.4))
-        try:
-            bot.edit_message_text(stage, chat_id, msg.message_id, parse_mode='Markdown')
-        except Exception:
-            pass
-    return msg
+# === /today — FIXED FOR CALLBACKS + PREDICTIONS ===
+LOADING_PHASES = [
+    "Loading.. 🔄", "Analyzing.. 📊", "Calculating.. 🧮", "Hold my beer 🍺", 
+    "Poisson digging 🔍", "Simulating chaos 🌪️", "Crunching numbers 🥨", "Monte Carlo magic ✨"
+]
 
-# === /today — FIXED FOR CALLBACKS + animated loader ===
 def run_today(chat_id, reply_to_id=None):
     uid = chat_id
     if uid in LOADING_MSGS:
         return
 
-    loading = fun_loading(chat_id, "Fetching today's fixtures", reply_to_message_id=reply_to_id, stages_count=3)
+    loading_msg = random.choice(LOADING_PHASES)
+    loading = bot.send_message(chat_id, f"*{loading_msg}*", reply_to_message_id=reply_to_id, parse_mode='Markdown')
     LOADING_MSGS[uid] = loading.message_id
 
     try:
@@ -480,7 +446,15 @@ def run_today(chat_id, reply_to_id=None):
         def fetch_league(lid, name):
             data = safe_get(f"{API_BASE}/competitions/{lid}/matches", {'dateFrom': today, 'dateTo': today})
             if not data or not data.get('matches'): return []
-            return [(m['homeTeam']['name'], m['awayTeam']['name'], m['utcDate'][11:16]) for m in data['matches']]
+            results = []
+            for m in data['matches'][:3]:
+                home = m['homeTeam']['name']
+                away = m['awayTeam']['name']
+                hid = m['homeTeam']['id']
+                aid = m['awayTeam']['id']
+                pred = predict_with_ids(hid, aid, home, away, '', '')
+                results.append(f"`{m['utcDate'][11:16]}` {home} vs {away}\n{pred}")
+            return results
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             futures = {executor.submit(fetch_league, lid, name): name for name, lid in LEAGUE_MAP.items() if ' ' in name}
@@ -490,17 +464,14 @@ def run_today(chat_id, reply_to_id=None):
                     matches = future.result()
                     if matches:
                         all_fixtures.append(f"**{league_name.title()}**")
-                        for h, a, t in matches[:3]:
-                            all_fixtures.append(f"`{t}` {h} vs {a}")
-                        if len(matches) > 3:
-                            all_fixtures.append(f"_+{len(matches)-3} more..._")
+                        all_fixtures.extend(matches)
                         all_fixtures.append("")
                 except: pass
 
         if not all_fixtures:
             result = "No fixtures today in major leagues."
         else:
-            result = "*Today's Fixtures*\n\n" + "\n".join(all_fixtures).strip()
+            result = "*Today's Fixtures & Predictions*\n\n" + "\n".join(all_fixtures).strip()
 
         bot.edit_message_text(
             chat_id=chat_id,
@@ -518,14 +489,14 @@ def run_today(chat_id, reply_to_id=None):
     finally:
         LOADING_MSGS.pop(uid, None)
 
-# === /users — FIXED FOR CALLBACKS + animated loader ===
+# === /users — FIXED FOR CALLBACKS WITH LOADING.. PHRASES ===
 def run_users(chat_id, reply_to_id=None):
-    loading = fun_loading(chat_id, "Compiling active users", reply_to_message_id=reply_to_id, stages_count=3)
-    try:
-        active = len(USER_SESSIONS)
-        bot.edit_message_text(chat_id=chat_id, message_id=loading.message_id, text=f"**Active users:** `{active}`", parse_mode='Markdown')
-    except Exception:
-        bot.send_message(chat_id, f"**Active users:** `{active}`", parse_mode='Markdown')
+    uid = chat_id
+    loading_msg = random.choice(LOADING_PHASES[:1])  # only show "Loading.." type
+    loading = bot.send_message(chat_id, f"*{loading_msg}*", reply_to_message_id=reply_to_id, parse_mode='Markdown')
+    time.sleep(1.5)  # simulate processing
+    active = len(USER_SESSIONS)
+    bot.edit_message_text(chat_id=chat_id, message_id=loading.message_id, text=f"**Active users:** `{active}`", parse_mode='Markdown')
 
 # === PAGINATED /start MENU ===
 @bot.message_handler(commands=['start'])
@@ -536,7 +507,7 @@ def show_menu_page(m, page=1):
     markup = types.InlineKeyboardMarkup(row_width=2)
     
     if page == 1:
-        text = "*Welcome to KickVision v1.0.5*\n\n*Page 1: Major Leagues*\n\nClick a league below:"
+        text = "*Welcome to KickVision v1.0.0*\n\n*Page 1: Major Leagues*\n\nClick a league below:"
         row1 = [
             types.InlineKeyboardButton("Premier League", callback_data="cmd_/premierleague"),
             types.InlineKeyboardButton("La Liga", callback_data="cmd_/laliga")
@@ -558,96 +529,27 @@ def show_menu_page(m, page=1):
             types.InlineKeyboardButton("Today", callback_data="cmd_/today"),
             types.InlineKeyboardButton("Users", callback_data="cmd_/users")
         ]
-        # Help uses help_1 to trigger paginated help via callback
         row2 = [types.InlineKeyboardButton("Help", callback_data="help_1")]
         nav_row = [types.InlineKeyboardButton("Prev", callback_data="menu_1")]
         markup.add(*row1, *row2, *nav_row)
     
     bot.send_message(m.chat.id, text, reply_markup=markup, parse_mode='Markdown')
 
-# === HELP PAGES (paginated, interactive) ===
-def build_help_page(page):
-    """
-    Return (text, markup) for given help page number.
-    """
-    markup = types.InlineKeyboardMarkup(row_width=3)
-    # navigation buttons
-    prev_btn = types.InlineKeyboardButton("⬅ Prev", callback_data=f"help_{max(1, page-1)}")
-    next_btn = types.InlineKeyboardButton("Next ➡", callback_data=f"help_{page+1}")
-    close_btn = types.InlineKeyboardButton("Close", callback_data="menu_2")
-    
-    if page == 1:
-        text = (
-            "📘 *KickVision — Help (Page 1/3)*\n\n"
-            "*Commands*\n"
-            "• `/today` — Show today's fixtures across major leagues.\n"
-            "• `/users` — Display number of active users.\n"
-            "• `/premierleague`, `/laliga`, `/bundesliga`, `/seriea` — Get upcoming fixtures for a league.\n"
-            "• `Team A vs Team B` — Type a match like `Man City vs Chelsea` to get predictions.\n\n"
-            "_Tap Next for examples and tips._"
-        )
-        markup.add(next_btn, close_btn)
-    elif page == 2:
-        text = (
-            "🧾 *KickVision — Examples (Page 2/3)*\n\n"
-            "*How to ask*\n"
-            "• `Manchester City vs Arsenal` — bot will try to resolve teams and may ask `Did you mean?` with options.\n"
-            "• After options show, reply with two numbers like `1 2` to pick Home option 1 and Away option 2.\n\n"
-            "*League command*\n"
-            "• `/premierleague` or press the menu button → shows upcoming matches and predictions.\n\n"
-            "_Tap Next for tips & tricks._"
-        )
-        markup.add(prev_btn, next_btn, close_btn)
-    elif page == 3:
-        text = (
-            "💡 *KickVision — Tips & Tricks (Page 3/3)*\n\n"
-            "• If the bot can't find a team, try a common alias or the club's short name.\n"
-            "• Use `/cancel` to cancel a pending selection.\n"
-            "• If results look odd, the API may be rate-limited — try again in a minute.\n\n"
-            "Enjoy — and don’t forget to press Help from the menu any time!"
-        )
-        markup.add(prev_btn, close_btn)
-    else:
-        # default to page 1 if page is out of range
-        return build_help_page(1)
-    return text, markup
-
-def show_help_page(message, page=1):
-    """
-    Display a help page. message may be a callback message (from a button) or a normal Message.
-    We try to edit the existing message when called from callbacks, otherwise send a new message.
-    """
-    text, markup = build_help_page(page)
-    try:
-        # Try to edit the message (works if called from a callback where the message is the menu)
-        bot.edit_message_text(chat_id=message.chat.id, message_id=message.message_id, text=text, reply_markup=markup, parse_mode='Markdown')
-    except Exception:
-        # Fallback: send a new message (for typed /help)
-        bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
-
-# Add /help command that sends the first help page
-@bot.message_handler(commands=['help'])
-def run_help_cmd(message):
-    show_help_page(message, 1)
-
-# === CALLBACK HANDLER — FULLY FIXED + help callbacks handled ===
+# === CALLBACK HANDLER — FULLY FIXED ===
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     chat_id = call.message.chat.id
     reply_to_id = call.message.message_id
 
-    data = call.data
-    bot.answer_callback_query(call.id)
+    if call.data.startswith("cmd_/"):
+        cmd = call.data[4:]
+        bot.answer_callback_query(call.id)
 
-    if data.startswith("cmd_/"):
-        # keep leading slash so comparisons like "/today" work
-        cmd = data[4:]
         if cmd == "/today":
             run_today(chat_id, reply_to_id)
         elif cmd == "/users":
             run_users(chat_id, reply_to_id)
         else:
-            # treat as league/command text
             real_msg = types.Message(
                 message_id=call.message.message_id,
                 from_user=call.from_user,
@@ -660,13 +562,15 @@ def callback_handler(call):
             real_msg.text = cmd
             dynamic_league_handler(real_msg)
 
-    elif data.startswith("menu_"):
-        page = int(data.split("_")[1])
+    elif call.data.startswith("menu_"):
+        page = int(call.data.split("_")[1])
+        bot.answer_callback_query(call.id)
         show_menu_page(call.message, page)
     
-    elif data.startswith("help_"):
-        page = int(data.split("_")[1])
+    elif call.data.startswith("help_"):
+        page = int(call.data.split("_")[1])
         show_help_page(call.message, page)
+        bot.answer_callback_query(call.id)
 
 # === DYNAMIC LEAGUE HANDLER ===
 @bot.message_handler(func=lambda m: any(m.text and (m.text.lower().startswith(f"/{k.replace(' ', '')}") or m.text.lower() == k) for k in LEAGUE_MAP))
@@ -680,19 +584,14 @@ def dynamic_league_handler(m):
         return
     display_name = matched.title() if ' ' in matched else matched.upper()
 
-    # animated loader (reply to the original user message if available)
-    reply_id = m.message_id if hasattr(m, 'message_id') else None
-    loading = fun_loading(m.chat.id, "Loading fixtures...", reply_to_message_id=reply_id, stages_count=3)
+    loading = bot.reply_to(m, "*Loading fixtures...*")
     fixtures = get_league_fixtures(matched)
-    try:
-        bot.edit_message_text(
-            chat_id=m.chat.id,
-            message_id=loading.message_id,
-            text=f"*{display_name} Upcoming*\n\n{fixtures}" if fixtures else "No fixtures.",
-            parse_mode='Markdown'
-        )
-    except Exception:
-        bot.send_message(m.chat.id, f"*{display_name} Upcoming*\n\n{fixtures}" if fixtures else "No fixtures.", parse_mode='Markdown')
+    bot.edit_message_text(
+        chat_id=m.chat.id,
+        message_id=loading.message_id,
+        text=f"*{display_name} Upcoming*\n\n{fixtures}" if fixtures else "No fixtures.",
+        parse_mode='Markdown'
+    )
 
 # === RATE LIMIT ===
 def is_allowed(uid):
@@ -726,19 +625,16 @@ def handle(m):
             if 1 <= h_choice <= len(home_opts) and 1 <= a_choice <= len(away_opts):
                 h = home_opts[h_choice-1]
                 a = away_opts[a_choice-1]
-                # animated predicting message
-                loading = fun_loading(m.chat.id, "Predicting...", reply_to_message_id=m.message_id, stages_count=3)
+                loading_msg = random.choice(LOADING_PHASES)
+                loading = bot.reply_to(m, f"*{loading_msg}*")
                 r = predict_with_ids(h[2], a[2], h[1], a[1], h[3], a[3])
-                try:
-                    bot.edit_message_text(
-                        chat_id=m.chat.id,
-                        message_id=loading.message_id,
-                        text=r,
-                        parse_mode='Markdown'
-                    )
-                except Exception:
-                    bot.send_message(m.chat.id, r, parse_mode='Markdown')
-                del PENDING_MATCH[uid]  # ← FIXED: Correct indent + spelling
+                bot.edit_message_text(
+                    chat_id=m.chat.id,
+                    message_id=loading.message_id,
+                    text=r,
+                    parse_mode='Markdown'
+                )
+                del PENDING_MATCH[uid]
             else:
                 bot.reply_to(m, "Invalid. Try `1 2` or /cancel")
         else:
@@ -749,11 +645,11 @@ def handle(m):
         bot.reply_to(m, "Wait 5s...")
         return
 
-    txt = re.sub(r'[|\[\](){}]', ' ', txt)
-    if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE):
+    txt_clean = re.sub(r'[|\[\](){}]', ' ', txt)
+    if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt_clean, re.IGNORECASE):
         return
 
-    parts = re.split(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE)
+    parts = re.split(r'\s+vs\s+|\s+[-–—]\s+', txt_clean, re.IGNORECASE)
     home = parts[0].strip()
     away = ' '.join(parts[1:]).strip()
 
@@ -766,19 +662,18 @@ def handle(m):
 
     if home_cands[0][0] > 0.9 and away_cands[0][0] > 0.9:
         h = home_cands[0]; a = away_cands[0]
-        loading = fun_loading(m.chat.id, "Predicting...", reply_to_message_id=m.message_id, stages_count=3)
+        loading_msg = random.choice(LOADING_PHASES)
+        loading = bot.reply_to(m, f"*{loading_msg}*")
         r = predict_with_ids(h[2], a[2], h[1], a[1], h[3], a[3])
-        try:
-            bot.edit_message_text(
-                chat_id=m.chat.id,
-                message_id=loading.message_id,
-                text=r,
-                parse_mode='Markdown'
-            )
-        except Exception:
-            bot.send_message(m.chat.id, r, parse_mode='Markdown')
+        bot.edit_message_text(
+            chat_id=m.chat.id,
+            message_id=loading.message_id,
+            text=r,
+            parse_mode='Markdown'
+        )
         return
 
+    # multiple candidates — ask user
     msg = [f"*Did you mean?*"]
     msg.append(f"**Home:** {home}")
     for i, (_, name, _, tla, _, lname) in enumerate(home_cands, 1):
@@ -789,6 +684,48 @@ def handle(m):
     msg.append("\nReply with two numbers: `1 3`")
     bot.reply_to(m, '\n'.join(msg), parse_mode='Markdown')
     PENDING_MATCH[uid] = (home, away, home_cands, away_cands)
+
+# === PAGINATED HELP MENU ===
+HELP_PAGES = [
+    """*KickVision Help — Page 1*
+
+Welcome! Here's how to use me:
+
+- `/today` — Shows today's matches with predictions.
+- `/users` — Shows active users.
+- `/Team vs Team` — Example: `Liverpool vs Chelsea`
+- Use `/cancel` to cancel a prediction input.
+""",
+    """*KickVision Help — Page 2*
+
+Tips:
+
+- You can type team names in any common format.
+- Examples:
+  - `Man City vs PSG`
+  - `Bayern 04 Leverkusen`
+- If multiple matches are possible, reply with the numbers.
+- Predictions are calculated with 100×1000 Monte Carlo sims.
+""",
+    """*KickVision Help — Page 3*
+
+Interactive Tips:
+
+- Use the menu to quickly access major leagues.
+- Use `/start` anytime to bring up the menu.
+- Enjoy random fun loading messages like 🔄, 🧮, 🍺, ✨.
+- Predictions include xG, most likely score, and win probabilities.
+"""
+]
+
+def show_help_page(message, page=1):
+    page = max(1, min(len(HELP_PAGES), page))
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    if page > 1:
+        markup.add(types.InlineKeyboardButton("Prev", callback_data=f"help_{page-1}"))
+    if page < len(HELP_PAGES):
+        markup.add(types.InlineKeyboardButton("Next", callback_data=f"help_{page+1}"))
+    bot.send_message(message.chat.id, HELP_PAGES[page-1], reply_markup=markup, parse_mode='Markdown')
 
 # === FLASK WEBHOOK ===
 app = Flask(__name__)
@@ -801,7 +738,7 @@ def webhook():
     return 'Invalid', 403
 
 if __name__ == '__main__':
-    log.info("KickVision v1.0.5 — DEPLOY-READY")
+    log.info("KickVision v1.0.0 — DEPLOY-READY")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
