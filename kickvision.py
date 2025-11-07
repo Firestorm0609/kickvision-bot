@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-KickVision v1.0.2 — FINAL + BUGFIX
-Clickable Today WORKS | /users = total unique users | Real draws | 5+ goals
+KickVision v1.0.3 — PAGINATED MENU + ACTIVE USERS
+2-Page Menu | Clickable Today | Active users | Real draws | 5+ goals
 """
 
 import os
@@ -54,27 +54,6 @@ USER_SESSIONS = set()
 ODDS_CACHE = {}
 LOADING_MSGS = {}
 HELP_STATE = {}
-TOTAL_USERS_DB = "total_users.json"
-
-# === PERSISTENT TOTAL USERS ===
-def load_total_users():
-    if os.path.exists(TOTAL_USERS_DB):
-        try:
-            with open(TOTAL_USERS_DB, "r") as f:
-                return set(json.load(f))
-        except Exception as e:
-            log.warning(f"Failed to load {TOTAL_USERS_DB}: {e}")
-            return set()
-    return set()
-
-def save_total_users(users_set):
-    try:
-        with open(TOTAL_USERS_DB, "w") as f:
-            json.dump(list(users_set), f)
-    except Exception as e:
-        log.warning(f"Failed to save {TOTAL_USERS_DB}: {e}")
-
-TOTAL_USERS = load_total_users()
 
 # === LEAGUE MAP ===
 LEAGUE_MAP = {
@@ -502,37 +481,53 @@ def today_handler(m):
     finally:
         LOADING_MSGS.pop(uid, None)
 
-# === CLICKABLE /start ===
+# === PAGINATED /start MENU ===
 @bot.message_handler(commands=['start'])
 def start(m):
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    row1 = [
-        types.InlineKeyboardButton("Premier League", callback_data="cmd_/premierleague"),
-        types.InlineKeyboardButton("La Liga", callback_data="cmd_/laliga")
-    ]
-    row2 = [
-        types.InlineKeyboardButton("Bundesliga", callback_data="cmd_/bundesliga"),
-        types.InlineKeyboardButton("Serie A", callback_data="cmd_/seriea")
-    ]
-    row3 = [
-        types.InlineKeyboardButton("Ligue 1", callback_data="cmd_/ligue1"),
-        types.InlineKeyboardButton("Champions", callback_data="cmd_/champions")
-    ]
-    row4 = [
-        types.InlineKeyboardButton("Today", callback_data="cmd_/today"),
-        types.InlineKeyboardButton("Help", callback_data="help_1")
-    ]
-    markup.add(*row1, *row2, *row3, *row4)
-    bot.send_message(m.chat.id, "*Welcome to KickVision v1.0.2*\n\nClick a league below:", reply_markup=markup, parse_mode='Markdown')
+    show_menu_page(m, 1)  # Start with Page 1
 
-# === CALLBACK HANDLER — FIXED: Today button now works ===
+def show_menu_page(m, page=1):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    
+    if page == 1:
+        # Page 1: Leagues
+        text = "*Welcome to KickVision v1.0.3*\n\n*Page 1: Major Leagues*\n\nClick a league below:"
+        row1 = [
+            types.InlineKeyboardButton("Premier League", callback_data="cmd_/premierleague"),
+            types.InlineKeyboardButton("La Liga", callback_data="cmd_/laliga")
+        ]
+        row2 = [
+            types.InlineKeyboardButton("Bundesliga", callback_data="cmd_/bundesliga"),
+            types.InlineKeyboardButton("Serie A", callback_data="cmd_/seriea")
+        ]
+        row3 = [
+            types.InlineKeyboardButton("Ligue 1", callback_data="cmd_/ligue1"),
+            types.InlineKeyboardButton("Champions", callback_data="cmd_/champions")
+        ]
+        nav_row = [types.InlineKeyboardButton("Next →", callback_data="menu_2")]
+        markup.add(*row1, *row2, *row3, *nav_row)
+    
+    elif page == 2:
+        # Page 2: Today + Users + Help
+        text = "*KickVision Menu*\n\n*Page 2: Quick Actions*\n\nChoose an option:"
+        row1 = [
+            types.InlineKeyboardButton("📅 Today", callback_data="cmd_/today"),
+            types.InlineKeyboardButton("👥 Users", callback_data="cmd_/users")
+        ]
+        row2 = [types.InlineKeyboardButton("❓ Help", callback_data="help_1")]
+        nav_row = [types.InlineKeyboardButton("← Prev", callback_data="menu_1")]
+        markup.add(*row1, *row2, *nav_row)
+    
+    bot.send_message(m.chat.id, text, reply_markup=markup, parse_mode='Markdown')
+
+# === CALLBACK HANDLER — FIXED + PAGINATION SUPPORT ===
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     if call.data.startswith("cmd_/"):
         cmd = call.data[5:]
         bot.answer_callback_query(call.id)
 
-        # REAL Message with current timestamp
+        # Build a REAL Message with current timestamp
         real_msg = types.Message(
             message_id=call.message.message_id,
             from_user=call.from_user,
@@ -546,8 +541,17 @@ def callback_handler(call):
 
         if cmd == "/today":
             today_handler(real_msg)
+        elif cmd == "/users":
+            users_cmd(real_msg)
         else:
             dynamic_league_handler(real_msg)
+    
+    elif call.data.startswith("menu_"):
+        # Menu pagination
+        page = int(call.data.split("_")[1])
+        bot.answer_callback_query(call.id)
+        show_menu_page(call.message, page)
+    
     elif call.data.startswith("help_"):
         page = int(call.data.split("_")[1])
         show_help_page(call.message, page)
@@ -566,7 +570,7 @@ def show_help_page(m, page=1):
             "• Or click a league below\n\n"
             "*Commands:*\n"
             "`/today` — All fixtures today\n"
-            "`/users` — Total unique users\n"
+            "`/users` — Active users\n"
             "`/cancel` — Cancel selection\n\n"
             "Next →"
         )
@@ -643,11 +647,11 @@ def is_allowed(uid):
     user_rate[uid].append(now)
     return True
 
-# === /users — Shows total unique users ever ===
+# === /users — REVERTED: Active users only ===
 @bot.message_handler(commands=['users'])
 def users_cmd(m):
-    total = len(TOTAL_USERS)
-    bot.reply_to(m, f"**Total unique users ever:** `{total}`", parse_mode='Markdown')
+    active = len(USER_SESSIONS)
+    bot.reply_to(m, f"**Active users:** `{active}`", parse_mode='Markdown')
 
 # === MAIN HANDLER ===
 @bot.message_handler(func=lambda m: True)
@@ -656,9 +660,6 @@ def handle(m):
     uid = m.from_user.id
     txt = m.text.strip()
 
-    # Track user
-    TOTAL_USERS.add(uid)
-    save_total_users(TOTAL_USERS)
     USER_SESSIONS.add(uid)
 
     if txt.strip().lower() == '/cancel':
@@ -744,7 +745,7 @@ def webhook():
     return 'Invalid', 403
 
 if __name__ == '__main__':
-    log.info("KickVision v1.0.2 — Clickable Today FIXED + Total Users")
+    log.info("KickVision v1.0.3 — Paginated Menu + Active Users")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
