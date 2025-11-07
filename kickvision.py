@@ -430,15 +430,15 @@ def get_league_fixtures(league_name):
 # === FUN LOADING ANIMATIONS ===
 def fun_loading(chat_id, base_text="Loading", reply_to_message_id=None, stages_count=3):
     stages = [
-        "Loading data",
-        "Analyzing formations",
-        "Crunching xG stats",
-        "Poisson digging",
-        "Hold my beer",
-        "Running Monte Carlo chaos",
-        "Calibrating models",
-        "Almost there…",
-        "Finalizing predictions"
+        "Loading data ⚙️",
+        "Analyzing formations 🧠",
+        "Crunching xG stats 📊",
+        "Poisson digging 🔢",
+        "Hold my beer 🍺",
+        "Running Monte Carlo chaos 🧮",
+        "Calibrating models 🤖",
+        "Almost there… ⚡",
+        "Finalizing predictions 🧮"
     ]
     random.shuffle(stages)
     try:
@@ -456,7 +456,7 @@ def fun_loading(chat_id, base_text="Loading", reply_to_message_id=None, stages_c
             pass
     return msg
 
-# === /today — FULL PREDICTIONS + UTC ===
+# === /today — FULL PREDICTIONS + UTC + EMOJIS ===
 def run_today(chat_id, reply_to_id=None):
     uid = chat_id
     if uid in LOADING_MSGS:
@@ -520,14 +520,14 @@ def run_today(chat_id, reply_to_id=None):
     finally:
         LOADING_MSGS.pop(uid, None)
 
-# === /users — CUSTOM 2-STEP ANIMATION ===
+# === /users — FUN 2-STEP ANIMATION WITH EMOJIS ===
 def run_users(chat_id, reply_to_id=None):
     uid = chat_id
     if uid in LOADING_MSGS:
         return
 
     loading_msg = bot.send_message(
-        chat_id, "Compiling active users...", 
+        chat_id, "Compiling active users... 🔍", 
         reply_to_message_id=reply_to_id, 
         parse_mode='Markdown'
     )
@@ -538,7 +538,7 @@ def run_users(chat_id, reply_to_id=None):
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=loading_msg.message_id,
-            text="Hold my beer",
+            text="Hold my beer 🍺",
             parse_mode='Markdown'
         )
         time.sleep(random.uniform(0.8, 1.3))
@@ -581,7 +581,7 @@ def show_menu_page(m, page=1):
             types.InlineKeyboardButton("Ligue 1", callback_data="cmd_/ligue1"),
             types.InlineKeyboardButton("Champions", callback_data="cmd_/champions")
         ]
-        nav_row = [types.InlineKeyboardButton("Next", callback_data="menu_2")]
+        nav_row = [types.InlineKeyboardButton("Next ➡", callback_data="menu_2")]
         markup.add(*row1, *row2, *row3, *nav_row)
     
     elif page == 2:
@@ -591,7 +591,7 @@ def show_menu_page(m, page=1):
             types.InlineKeyboardButton("Users", callback_data="cmd_/users")
         ]
         row2 = [types.InlineKeyboardButton("Help", callback_data="help_1")]
-        nav_row = [types.InlineKeyboardButton("Prev", callback_data="menu_1")]
+        nav_row = [types.InlineKeyboardButton("Prev ⬅", callback_data="menu_1")]
         markup.add(*row1, *row2, *nav_row)
     
     bot.send_message(m.chat.id, text, reply_markup=markup, parse_mode='Markdown')
@@ -599,18 +599,18 @@ def show_menu_page(m, page=1):
 # === HELP PAGES ===
 def build_help_page(page):
     markup = types.InlineKeyboardMarkup(row_width=3)
-    prev_btn = types.InlineKeyboardButton("Prev", callback_data=f"help_{max(1, page-1)}")
-    next_btn = types.InlineKeyboardButton("Next", callback_data=f"help_{page+1}")
+    prev_btn = types.InlineKeyboardButton("⬅ Prev", callback_data=f"help_{max(1, page-1)}")
+    next_btn = types.InlineKeyboardButton("Next ➡", callback_data=f"help_{page+1}")
     close_btn = types.InlineKeyboardButton("Close", callback_data="menu_2")
     
     if page == 1:
         text = (
             "*KickVision — Help (Page 1/3)*\n\n"
             "*Commands*\n"
-            "• `/today` — Show today's fixtures across major leagues.\n"
-            "• `/users` — Display number of active users.\n"
-            "• `/premierleague`, `/laliga`, etc — Get upcoming fixtures.\n"
-            "• `Team A vs Team B` — Type a match to get predictions.\n\n"
+            "• `/today` — Show today's fixtures.\n"
+            "• `/users` — Display active users.\n"
+            "• `/premierleague`, etc — Get upcoming.\n"
+            "• `Team A vs Team B` — Get predictions.\n\n"
             "_Tap Next for examples._"
         )
         markup.add(next_btn, close_btn)
@@ -618,8 +618,8 @@ def build_help_page(page):
         text = (
             "*KickVision — Examples (Page 2/3)*\n\n"
             "*How to ask*\n"
-            "• `Man City vs Arsenal` → bot may ask `Did you mean?`\n"
-            "• Reply with `1 2` to pick options.\n\n"
+            "• `Man City vs Arsenal` → may ask `Did you mean?`\n"
+            "• Reply `1 2` to pick.\n\n"
             "*League command*\n"
             "• `/premierleague` → shows predictions.\n\n"
             "_Tap Next for tips._"
@@ -628,7 +628,7 @@ def build_help_page(page):
     elif page == 3:
         text = (
             "*KickVision — Tips (Page 3/3)*\n\n"
-            "• Try short names or aliases.\n"
+            "• Try aliases or short names.\n"
             "• Use `/cancel` to reset.\n"
             "• Rate-limited? Wait 1 min.\n\n"
             "Enjoy!"
