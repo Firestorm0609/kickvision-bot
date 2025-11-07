@@ -430,15 +430,15 @@ def get_league_fixtures(league_name):
 # === FUN LOADING ANIMATIONS ===
 def fun_loading(chat_id, base_text="Loading", reply_to_message_id=None, stages_count=3):
     stages = [
-        "Loading data ⚙️",
-        "Analyzing formations 🧠",
-        "Crunching xG stats 📊",
-        "Poisson digging 🔢",
-        "Hold my beer 🍺",
-        "Running Monte Carlo chaos 🧮",
-        "Calibrating models 🤖",
-        "Almost there… ⚡",
-        "Finalizing predictions 🧮"
+        "Loading data [gear]",
+        "Analyzing formations [brain]",
+        "Crunching xG stats [bar chart]",
+        "Poisson digging [magnifying glass]",
+        "Hold my beer [beer mug]",
+        "Running Monte Carlo chaos [game die]",
+        "Calibrating models [robot]",
+        "Almost there… [lightning]",
+        "Finalizing predictions [game die]"
     ]
     random.shuffle(stages)
     try:
@@ -527,7 +527,7 @@ def run_users(chat_id, reply_to_id=None):
         return
 
     loading_msg = bot.send_message(
-        chat_id, "Compiling active users... 🔍", 
+        chat_id, "Compiling active users... [magnifying glass]", 
         reply_to_message_id=reply_to_id, 
         parse_mode='Markdown'
     )
@@ -538,7 +538,7 @@ def run_users(chat_id, reply_to_id=None):
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=loading_msg.message_id,
-            text="Hold my beer 🍺",
+            text="Hold my beer [beer mug]",
             parse_mode='Markdown'
         )
         time.sleep(random.uniform(0.8, 1.3))
@@ -581,7 +581,7 @@ def show_menu_page(m, page=1):
             types.InlineKeyboardButton("Ligue 1", callback_data="cmd_/ligue1"),
             types.InlineKeyboardButton("Champions", callback_data="cmd_/champions")
         ]
-        nav_row = [types.InlineKeyboardButton("Next ➡", callback_data="menu_2")]
+        nav_row = [types.InlineKeyboardButton("Next [right arrow]", callback_data="menu_2")]
         markup.add(*row1, *row2, *row3, *nav_row)
     
     elif page == 2:
@@ -591,16 +591,16 @@ def show_menu_page(m, page=1):
             types.InlineKeyboardButton("Users", callback_data="cmd_/users")
         ]
         row2 = [types.InlineKeyboardButton("Help", callback_data="help_1")]
-        nav_row = [types.InlineKeyboardButton("Prev ⬅", callback_data="menu_1")]
+        nav_row = [types.InlineKeyboardButton("Prev [left arrow]", callback_data="menu_1")]
         markup.add(*row1, *row2, *nav_row)
     
     bot.send_message(m.chat.id, text, reply_markup=markup, parse_mode='Markdown')
 
-# === HELP PAGES ===
+# === HELP PAGES (with page emoji on every page) ===
 def build_help_page(page):
     markup = types.InlineKeyboardMarkup(row_width=3)
-    prev_btn = types.InlineKeyboardButton("⬅ Prev", callback_data=f"help_{max(1, page-1)}")
-    next_btn = types.InlineKeyboardButton("Next ➡", callback_data=f"help_{page+1}")
+    prev_btn = types.InlineKeyboardButton("[left arrow] Prev", callback_data=f"help_{max(1, page-1)}")
+    next_btn = types.InlineKeyboardButton("Next [right arrow]", callback_data=f"help_{page+1}")
     close_btn = types.InlineKeyboardButton("Close", callback_data="menu_2")
     
     if page == 1:
@@ -716,7 +716,7 @@ def is_allowed(uid):
     user_rate[uid].append(now)
     return True
 
-# === MAIN HANDLER ===
+# === MAIN HANDLER (Team vs Team) ===
 @bot.message_handler(func=lambda m: True)
 def handle(m):
     if not m.text: return
@@ -762,8 +762,38 @@ def handle(m):
         bot.reply_to(m, "Wait 5s...")
         return
 
+    # --------------------------------------------------------------
+    # 1. Show a quick “searching” animation while we look up teams
+    # --------------------------------------------------------------
+    searching_msg = bot.reply_to(
+        m,
+        "Checking [magnifying glass] ...",
+        parse_mode='Markdown'
+    )
+    # alternate two icons for a tiny “checking” loop
+    for _ in range(4):
+        time.sleep(0.55)
+        icon = "[magnifying glass]" if _ % 2 == 0 else "[magnifying glass]"
+        try:
+            bot.edit_message_text(
+                chat_id=m.chat.id,
+                message_id=searching_msg.message_id,
+                text=f"Checking {icon} ...",
+                parse_mode='Markdown'
+            )
+        except Exception:
+            pass
+
+    # --------------------------------------------------------------
+    # 2. Normal team-vs-team logic (unchanged)
+    # --------------------------------------------------------------
     txt = re.sub(r'[|\[\](){}]', ' ', txt)
     if not re.search(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE):
+        # delete the searching message – nothing to predict
+        try:
+            bot.delete_message(m.chat.id, searching_msg.message_id)
+        except Exception:
+            pass
         return
 
     parts = re.split(r'\s+vs\s+|\s+[-–—]\s+', txt, re.IGNORECASE)
@@ -772,6 +802,12 @@ def handle(m):
 
     home_cands = find_team_candidates(home)
     away_cands = find_team_candidates(away)
+
+    # delete the searching placeholder
+    try:
+        bot.delete_message(m.chat.id, searching_msg.message_id)
+    except Exception:
+        pass
 
     if not home_cands or not away_cands:
         bot.reply_to(m, f"*{home} vs {away}*\n\n_Not found._", parse_mode='Markdown')
