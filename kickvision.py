@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-KickVision v1.0.0 — FINAL UX + MATH PERFECTION
-Clickable buttons | 3-page /help | Real draws | 5+ goals | Zero bugs
+KickVision v1.0.1 — FINAL + BUGFIXES
+Clickable Today | /users = total unique users | Real draws | 5+ goals
 """
 
 import os
@@ -53,7 +53,28 @@ PENDING_MATCH = {}
 USER_SESSIONS = set()
 ODDS_CACHE = {}
 LOADING_MSGS = {}
-HELP_STATE = {}  # Track help page
+HELP_STATE = {}
+TOTAL_USERS_DB = "total_users.json"
+
+# === PERSISTENT TOTAL USERS ===
+def load_total_users():
+    if os.path.exists(TOTAL_USERS_DB):
+        try:
+            with open(TOTAL_USERS_DB, "r") as f:
+                return set(json.load(f))
+        except Exception as e:
+            log.warning(f"Failed to load {TOTAL_USERS_DB}: {e}")
+            return set()
+    return set()
+
+def save_total_users(users_set):
+    try:
+        with open(TOTAL_USERS_DB, "w") as f:
+            json.dump(list(users_set), f)
+    except Exception as e:
+        log.warning(f"Failed to save {TOTAL_USERS_DB}: {e}")
+
+TOTAL_USERS = load_total_users()  # Persistent total unique users
 
 # === LEAGUE MAP ===
 LEAGUE_MAP = {
@@ -503,28 +524,31 @@ def start(m):
         types.InlineKeyboardButton("Help", callback_data="help_1")
     ]
     markup.add(*row1, *row2, *row3, *row4)
-    bot.send_message(m.chat.id, "*Welcome to KickVision v1.0.0*\n\nClick a league below:", reply_markup=markup, parse_mode='Markdown')
+    bot.send_message(m.chat.id, "*Welcome to KickVision v1.0.1*\n\nClick a league below:", reply_markup=markup, parse_mode='Markdown')
 
-# === CALLBACK HANDLER ===
+# === CALLBACK HANDLER — FIXED: Today button works ===
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     if call.data.startswith("cmd_/"):
         cmd = call.data[5:]
         bot.answer_callback_query(call.id)
-        fake_msg = types.Message(
+
+        # Build a REAL Message with current date
+        real_msg = types.Message(
             message_id=call.message.message_id,
             from_user=call.from_user,
-            date=None,
+            date=datetime.now(),  # Critical fix
             chat=call.message.chat,
             content_type='text',
             options=[],
             json_string=None
         )
-        fake_msg.text = cmd
+        real_msg.text = cmd
+
         if cmd == "/today":
-            today_handler(fake_msg)
+            today_handler(real_msg)
         else:
-            dynamic_league_handler(fake_msg)
+            dynamic_league_handler(real_msg)
     elif call.data.startswith("help_"):
         page = int(call.data.split("_")[1])
         show_help_page(call.message, page)
@@ -543,7 +567,7 @@ def show_help_page(m, page=1):
             "• Or click a league below\n\n"
             "*Commands:*\n"
             "`/today` — All fixtures today\n"
-            "`/users` — Active users\n"
+            "`/users` — Total unique users\n"
             "`/cancel` — Cancel selection\n\n"
             "Next →"
         )
@@ -620,9 +644,11 @@ def is_allowed(uid):
     user_rate[uid].append(now)
     return True
 
+# === /users — FIXED: Shows total unique users ever ===
 @bot.message_handler(commands=['users'])
 def users_cmd(m):
-    bot.reply_to(m, f"**Active Users:** `{len(USER_SESSIONS)}`", parse_mode='Markdown')
+    total = len(TOTAL_USERS)
+    bot.reply_to(m, f"**Total unique users ever:** `{total}`", parse_mode='Markdown')
 
 # === MAIN HANDLER ===
 @bot.message_handler(func=lambda m: True)
@@ -630,6 +656,11 @@ def handle(m):
     if not m.text: return
     uid = m.from_user.id
     txt = m.text.strip()
+
+    # === PERSISTENT USER TRACKING ===
+    TOTAL_USERS.add(uid)
+    save_total_users(TOTAL_USERS)
+
     USER_SESSIONS.add(uid)
 
     if txt.strip().lower() == '/cancel':
@@ -715,7 +746,7 @@ def webhook():
     return 'Invalid', 403
 
 if __name__ == '__main__':
-    log.info("KickVision v1.0.0 FINAL — Clickable + Real Draws + 5+ Goals")
+    log.info("KickVision v1.0.1 — Clickable Today + Total Users Fixed")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
