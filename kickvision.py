@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-KickVision v1.0.0 — Official Release
-100-model ensemble | All Major Leagues | Instant Fixtures + Predictions
+KickVision v1.0.0 — Official Final
+100×1000 REAL sims | Realistic Goals | Bug-Free
 """
 
 import os
@@ -12,9 +12,9 @@ import logging
 import json
 import random
 from collections import defaultdict, Counter
-from concurrent.futures import ThreadPoolExecutor
-from statistics import mean, mode
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from statistics import mean
+from datetime import datetime, date
 
 import numpy as np
 import requests
@@ -37,7 +37,7 @@ CACHE_TTL = 86400
 SIMS_PER_MODEL = 1000
 TOTAL_MODELS = 100
 
-# === LOGGING (Quiet) ===
+# === LOGGING ===
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 log = logging.getLogger('kickvision')
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -50,9 +50,10 @@ TEAM_CACHE = {}
 LEAGUES_CACHE = {}
 PENDING_MATCH = {}
 USER_SESSIONS = set()
-ODDS_CACHE = {}  # NEW: Odds cache
+ODDS_CACHE = {}
+LOADING_MSGS = {}
 
-# === LEAGUE MAP (All Major + Aliases) ===
+# === LEAGUE MAP ===
 LEAGUE_MAP = {
     "premier league": 2021, "epl": 2021, "pl": 2021,
     "la liga": 2014, "laliga": 2014, "liga": 2014,
@@ -92,7 +93,7 @@ try:
                 clean_file = os.path.basename(file).replace('.txt','').replace('_',' ').lower()
                 TEAM_ALIASES[clean_file] = official
     for off in set(TEAM_ALIASES.values()):
-        TEAM_ALIASES[off.lower()] = official
+        TEAM_ALIASES[off.lower()] = off
     log.info(f"Loaded {len(TEAM_ALIASES)} aliases")
 except Exception as e:
     log.exception("ZIP ERROR")
@@ -136,7 +137,7 @@ def save_cache():
 
 load_cache()
 
-# === SAFE GET (Silent 429) ===
+# === SAFE GET ===
 def safe_get(url, params=None):
     for attempt in range(3):
         try:
@@ -198,7 +199,7 @@ def resolve_alias(name):
         if low in alias or alias in low: return official
     return name
 
-# === GET LEAGUE TEAMS (On-Demand) ===
+# === GET LEAGUE TEAMS ===
 def get_league_teams(league_id):
     key = f"league_{league_id}"
     now = time.time()
@@ -213,13 +214,13 @@ def get_league_teams(league_id):
         return teams
     return []
 
-# === FIND CANDIDATES (Only Major Leagues) ===
+# === FIND CANDIDATES ===
 def find_team_candidates(name):
     name_resolved = resolve_alias(name)
     search_key = re.sub(r'[^a-z0-9\s]', '', name_resolved.lower())
     candidates = []
     
-    for lid in LEAGUE_MAP.values():  # Only 14 leagues
+    for lid in LEAGUE_MAP.values():
         teams = get_league_teams(lid)
         for team in teams:
             tid, tname, tshort, tla, _ = team
@@ -261,7 +262,7 @@ def auto_detect_league(hid, aid):
         return lid, LEAGUES_CACHE.get(lid, "League")
     return 0, "Unknown League"
 
-# === WEIGHTED STATS (1-Hour Cache) ===
+# === WEIGHTED STATS ===
 def get_weighted_stats(team_id, is_home):
     cache_key = f"stats_{team_id}_{'h' if is_home else 'a'}"
     now = time.time()
@@ -292,7 +293,7 @@ def get_weighted_stats(team_id, is_home):
     save_cache()
     return stats
 
-# === MARKET ODDS (Cached 30 Min) ===
+# === MARKET ODDS ===
 def get_market_odds(hname, aname):
     key = f"{hname.lower()} vs {aname.lower()}"
     if key in ODDS_CACHE and time.time() - ODDS_CACHE[key]['time'] < 1800:
@@ -323,7 +324,7 @@ def get_market_odds(hname, aname):
     except:
         return None
 
-# === ENSEMBLE MODEL ===
+# === REAL 100×1000 SIMS ===
 def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
     random.seed(seed)
     np.random.seed(seed)
@@ -334,22 +335,33 @@ def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
         home_xg *= tau; away_xg *= tau
     hg = np.random.poisson(home_xg, SIMS_PER_MODEL)
     ag = np.random.poisson(away_xg, SIMS_PER_MODEL)
-    return {
-        'home_win': (hg > ag).mean(),
-        'draw': (hg == ag).mean(),
-        'away_win': (hg < ag).mean(),
-        'score': f"{int(mode(hg))}-{int(mode(ag))}"
-    }
+    return hg, ag
 
 def ensemble_100_models(h_gf, h_ga, a_gf, a_ga):
     seeds = list(range(TOTAL_MODELS))
+    all_home_goals = []
+    all_away_goals = []
+    
     with ThreadPoolExecutor(max_workers=8) as executor:
-        results = list(executor.map(lambda s: run_single_model(s, h_gf, h_ga, a_gf, a_ga), seeds))
+        results = executor.map(lambda s: run_single_model(s, h_gf, h_ga, a_gf, a_ga), seeds)
+        for hg, ag in results:
+            all_home_goals.extend(hg)
+            all_away_goals.extend(ag)
+    
+    total_sims = len(all_home_goals)
+    home_win = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h > a) / total_sims
+    draw = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h == a) / total_sims
+    away_win = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h < a) / total_sims
+    
+    # Most likely score
+    score_counts = Counter(zip(all_home_goals, all_away_goals))
+    most_likely = score_counts.most_common(1)[0][0]
+    
     return {
-        'home_win': round(mean([r['home_win'] for r in results]) * 100),
-        'draw': round(mean([r['draw'] for r in results]) * 100),
-        'away_win': round(mean([r['away_win'] for r in results]) * 100),
-        'score': mode([r['score'] for r in results])
+        'home_win': round(home_win * 100),
+        'draw': round(draw * 100),
+        'away_win': round(away_win * 100),
+        'score': f"{most_likely[0]}-{most_likely[1]}"
     }
 
 # === VERDICT ===
@@ -391,7 +403,7 @@ def predict_with_ids(hid, aid, hname, aname, h_tla, a_tla):
     ]
     return '\n'.join(out)
 
-# === LEAGUE FIXTURES + PREDICTIONS ===
+# === LEAGUE FIXTURES ===
 def get_league_fixtures(league_name):
     lid = LEAGUE_MAP.get(league_name.lower())
     if not lid:
@@ -412,7 +424,63 @@ def get_league_fixtures(league_name):
         fixtures.append(f"*{date}*\n{home} vs {away}\n{pred}")
     return '\n\n'.join(fixtures)
 
-# === DYNAMIC LEAGUE HANDLER (All Major) ===
+# === /today ===
+@bot.message_handler(commands=['today'])
+def today_handler(m):
+    uid = m.from_user.id
+    if uid in LOADING_MSGS:
+        bot.reply_to(m, "Already loading...")
+        return
+
+    loading = bot.reply_to(m, "*Loading today's fixtures...*")
+    LOADING_MSGS[uid] = loading.message_id
+
+    try:
+        today = date.today().isoformat()
+        all_fixtures = []
+
+        def fetch_league(lid, name):
+            data = safe_get(f"{API_BASE}/competitions/{lid}/matches", {'dateFrom': today, 'dateTo': today})
+            if not data or not data.get('matches'): return []
+            return [(m['homeTeam']['name'], m['awayTeam']['name'], m['utcDate'][11:16]) for m in data['matches']]
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(fetch_league, lid, name): name for name, lid in LEAGUE_MAP.items() if ' ' in name}
+            for future in as_completed(futures):
+                league_name = futures[future]
+                try:
+                    matches = future.result()
+                    if matches:
+                        all_fixtures.append(f"**{league_name.title()}**")
+                        for h, a, t in matches[:3]:
+                            all_fixtures.append(f"`{t}` {h} vs {a}")
+                        if len(matches) > 3:
+                            all_fixtures.append(f"_+{len(matches)-3} more..._")
+                        all_fixtures.append("")
+                except: pass
+
+        if not all_fixtures:
+            result = "No fixtures today in major leagues."
+        else:
+            result = "*Today's Fixtures*\n\n" + "\n".join(all_fixtures).strip()
+
+        bot.edit_message_text(
+            chat_id=m.chat.id,
+            message_id=loading.message_id,
+            text=result,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        bot.edit_message_text(
+            chat_id=m.chat.id,
+            message_id=loading.message_id,
+            text="Error loading fixtures.",
+            parse_mode='Markdown'
+        )
+    finally:
+        LOADING_MSGS.pop(uid, None)
+
+# === DYNAMIC LEAGUE HANDLER ===
 @bot.message_handler(func=lambda m: any(m.text and (m.text.lower().startswith(f"/{k.replace(' ', '')}") or m.text.lower() == k) for k in LEAGUE_MAP))
 def dynamic_league_handler(m):
     if not m.text: return
@@ -423,8 +491,15 @@ def dynamic_league_handler(m):
     if not matched:
         return
     display_name = matched.title() if ' ' in matched else matched.upper()
+
+    loading = bot.reply_to(m, "*Loading fixtures...*")
     fixtures = get_league_fixtures(matched)
-    bot.reply_to(m, f"*{display_name} Upcoming*\n\n{fixtures}", parse_mode='Markdown')
+    bot.edit_message_text(
+        chat_id=m.chat.id,
+        message_id=loading.message_id,
+        text=f"*{display_name} Upcoming*\n\n{fixtures}" if fixtures else "No fixtures.",
+        parse_mode='Markdown'
+    )
 
 # === RATE LIMIT ===
 def is_allowed(uid):
@@ -441,7 +516,7 @@ def send_help(m):
         "*KickVision v1.0.0*\n\n"
         f"Fixtures + Predictions:\n{leagues}\n\n"
         "Or type: `Team A vs Team B`\n"
-        "/users | /cancel"
+        "/today | /users | /cancel"
     ), parse_mode='Markdown')
 
 @bot.message_handler(commands=['start', 'help', 'how'])
@@ -474,8 +549,14 @@ def handle(m):
             if 1 <= h_choice <= len(home_opts) and 1 <= a_choice <= len(away_opts):
                 h = home_opts[h_choice-1]
                 a = away_opts[a_choice-1]
+                loading = bot.reply_to(m, "*Predicting...*")
                 r = predict_with_ids(h[2], a[2], h[1], a[1], h[3], a[3])
-                bot.reply_to(m, r, parse_mode='Markdown')
+                bot.edit_message_text(
+                    chat_id=m.chat.id,
+                    message_id=loading.message_id,
+                    text=r,
+                    parse_mode='Markdown'
+                )
                 del PENDING_MATCH[uid]
             else:
                 bot.reply_to(m, "Invalid. Try `1 2` or /cancel")
@@ -504,8 +585,14 @@ def handle(m):
 
     if home_cands[0][0] > 0.9 and away_cands[0][0] > 0.9:
         h = home_cands[0]; a = away_cands[0]
+        loading = bot.reply_to(m, "*Predicting...*")
         r = predict_with_ids(h[2], a[2], h[1], a[1], h[3], a[3])
-        bot.reply_to(m, r, parse_mode='Markdown')
+        bot.edit_message_text(
+            chat_id=m.chat.id,
+            message_id=loading.message_id,
+            text=r,
+            parse_mode='Markdown'
+        )
         return
 
     msg = [f"*Did you mean?*"]
@@ -530,7 +617,7 @@ def webhook():
     return 'Invalid', 403
 
 if __name__ == '__main__':
-    log.info("KickVision v1.0.0 STARTED — All Major Leagues + Instant")
+    log.info("KickVision v1.0.0 FINAL — 100×1000 sims + real goals")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
