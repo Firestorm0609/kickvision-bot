@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-KickVision v1.2.0 — Complete Free Edition
-Added: Standings, team profiles, H2H history, top scorers, matchday fixtures
-Removed: Premium features, made everything free
+KickVision v1.3.0 — Enhanced Free Edition
+Added: Results comparison, live scores, FPL section, improved formatting
+Enhanced: Goal distribution, menu system, fixture display
 """
 
 import os
@@ -31,6 +31,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 API_BASE = 'https://api.football-data.org/v4'
+FPL_BASE = 'https://fantasy.premierleague.com/api'
 ZIP_FILE = 'clubs.zip'
 CACHE_FILE = 'team_cache.json'
 LEAGUES_CACHE_FILE = 'leagues_cache.json'
@@ -61,21 +62,23 @@ TEAM_RESOLVE_CACHE = {}
 USER_HISTORY = defaultdict(list)
 LEAGUES_LOADED = {}
 
-# === NEW: ENHANCED FEATURES CACHE ===
+# === ENHANCED FEATURES CACHE ===
 STANDINGS_CACHE = {}
-TEAM_PROFILE_CACHE = {}
-H2H_CACHE = {}
 SCORERS_CACHE = {}
 MATCHDAY_CACHE = {}
+LIVE_SCORES_CACHE = {}
+FPL_CACHE = {}
+RESULTS_CACHE = {}
 
 # Cache durations (seconds)
 CACHE_DURATIONS = {
     'standings': 7200,      # 2 hours
-    'team_profile': 21600,  # 6 hours  
-    'h2h': 86400,          # 24 hours
     'scorers': 43200,      # 12 hours
     'matchday': 3600,      # 1 hour
     'predictions': 3600,   # 1 hour
+    'live': 300,           # 5 minutes
+    'fpl': 1800,           # 30 minutes
+    'results': 3600,       # 1 hour
 }
 
 # Educational content
@@ -274,6 +277,7 @@ def get_league_standings(league_name):
     try:
         table = data['standings'][0]['table']  # Total standings
         standings_text = [f"*{LEAGUE_DISPLAY_NAMES.get(lid, league_name.title())} Standings* 📊\n"]
+        standings_text.append("═" * 40)
         
         for i, team in enumerate(table[:10]):  # Top 10 teams
             position = team['position']
@@ -293,13 +297,13 @@ def get_league_standings(league_name):
         
         # Add relegation zone if available
         if len(table) > 15:
-            relegation_text = "\n*Relegation Zone:*\n"
+            standings_text.append("\n*Relegation Zone:*")
+            standings_text.append("─" * 20)
             for team in table[-3:]:
                 position = team['position']
                 team_name = team['team']['name']
                 points = team['points']
-                relegation_text += f"🔻 `{position:2d}. {team_name[:15]:15s} PTS:{points:2d}`\n"
-            standings_text.append(relegation_text)
+                standings_text.append(f"🔻 `{position:2d}. {team_name[:15]:15s} PTS:{points:2d}`")
         
         result = '\n'.join(standings_text)
         STANDINGS_CACHE[cache_key] = {'time': now, 'data': result}
@@ -308,160 +312,6 @@ def get_league_standings(league_name):
     except Exception as e:
         log.error(f"Error parsing standings: {e}")
         return "Error parsing standings data."
-
-# === NEW: TEAM PROFILE ===
-def get_team_profile(team_name):
-    # Find team ID first
-    candidates = find_team_candidates(team_name)
-    if not candidates:
-        return f"Team '{team_name}' not found."
-    
-    team = candidates[0]  # Best match
-    team_id = team[2]
-    team_display_name = team[1]
-    
-    cache_key = f"team_{team_id}"
-    now = time.time()
-    
-    if cache_key in TEAM_PROFILE_CACHE and now - TEAM_PROFILE_CACHE[cache_key]['time'] < CACHE_DURATIONS['team_profile']:
-        return TEAM_PROFILE_CACHE[cache_key]['data']
-    
-    # Get team data
-    team_data = safe_get(f"{API_BASE}/teams/{team_id}")
-    if not team_data:
-        return f"Could not fetch data for {team_display_name}."
-    
-    try:
-        profile_text = [f"*{team_display_name} Profile* 🏆\n"]
-        
-        # Basic info
-        if 'venue' in team_data:
-            profile_text.append(f"*Stadium:* {team_data['venue']}")
-        if 'clubColors' in team_data:
-            profile_text.append(f"*Colors:* {team_data['clubColors']}")
-        if 'founded' in team_data:
-            profile_text.append(f"*Founded:* {team_data['founded']}")
-        
-        # Get recent matches for form
-        matches_data = safe_get(f"{API_BASE}/teams/{team_id}/matches", {'status': 'FINISHED', 'limit': 5})
-        if matches_data and 'matches' in matches_data:
-            form = []
-            for match in reversed(matches_data['matches']):
-                is_home = match['homeTeam']['id'] == team_id
-                home_goals = match['score']['fullTime']['home'] or 0
-                away_goals = match['score']['fullTime']['away'] or 0
-                
-                if (is_home and home_goals > away_goals) or (not is_home and away_goals > home_goals):
-                    form.append("✅")
-                elif home_goals == away_goals:
-                    form.append("➖")
-                else:
-                    form.append("❌")
-            
-            if form:
-                profile_text.append(f"*Recent Form:* {''.join(form)}")
-        
-        # Get squad if available
-        if 'squad' in team_data and team_data['squad']:
-            profile_text.append(f"\n*Key Players:*")
-            players = [p for p in team_data['squad'] if p['role'] in ['PLAYER', 'Captain']]
-            for player in players[:5]:  # Top 5 players
-                profile_text.append(f"• {player['name']} ({player.get('position', 'Player')})")
-        
-        result = '\n'.join(profile_text)
-        TEAM_PROFILE_CACHE[cache_key] = {'time': now, 'data': result}
-        return result
-        
-    except Exception as e:
-        log.error(f"Error parsing team profile: {e}")
-        return f"Error loading profile for {team_display_name}."
-
-# === NEW: HEAD-TO-HEAD HISTORY ===
-def get_head_to_head(team1_name, team2_name):
-    # Find team IDs
-    team1_candidates = find_team_candidates(team1_name)
-    team2_candidates = find_team_candidates(team2_name)
-    
-    if not team1_candidates or not team2_candidates:
-        return "One or both teams not found."
-    
-    team1 = team1_candidates[0]
-    team2 = team2_candidates[0]
-    team1_id = team1[2]
-    team2_id = team2[2]
-    
-    cache_key = f"h2h_{team1_id}_{team2_id}"
-    now = time.time()
-    
-    if cache_key in H2H_CACHE and now - H2H_CACHE[cache_key]['time'] < CACHE_DURATIONS['h2h']:
-        return H2H_CACHE[cache_key]['data']
-    
-    # Get H2H matches
-    data = safe_get(f"{API_BASE}/matches", {
-        'competitions': '2021,2014,2002,2019,2015,2001',  # Major competitions
-        'status': 'FINISHED',
-        'limit': 10
-    })
-    
-    if not data or 'matches' not in data:
-        return "Could not fetch head-to-head history."
-    
-    try:
-        # Filter matches between these two teams
-        h2h_matches = []
-        for match in data['matches']:
-            home_id = match['homeTeam']['id']
-            away_id = match['awayTeam']['id']
-            if (home_id == team1_id and away_id == team2_id) or (home_id == team2_id and away_id == team1_id):
-                h2h_matches.append(match)
-        
-        if not h2h_matches:
-            return f"No recent head-to-head history found between {team1[1]} and {team2[1]}."
-        
-        h2h_text = [f"*{team1[1]} vs {team2[1]} - Head to Head* ⚔️\n"]
-        
-        team1_wins = 0
-        team2_wins = 0
-        draws = 0
-        
-        for match in h2h_matches[:5]:  # Last 5 matches
-            home_team = match['homeTeam']['name']
-            away_team = match['awayTeam']['name']
-            home_goals = match['score']['fullTime']['home'] or 0
-            away_goals = match['score']['fullTime']['away'] or 0
-            date_str = match['utcDate'][:10]
-            
-            if home_goals > away_goals:
-                winner = home_team
-                if home_team == team1[1]:
-                    team1_wins += 1
-                else:
-                    team2_wins += 1
-            elif away_goals > home_goals:
-                winner = away_team
-                if away_team == team1[1]:
-                    team1_wins += 1
-                else:
-                    team2_wins += 1
-            else:
-                draws += 1
-                winner = "Draw"
-            
-            h2h_text.append(f"`{date_str}` {home_team} {home_goals}-{away_goals} {away_team}")
-        
-        # Summary
-        h2h_text.append(f"\n*Summary (Last {len(h2h_matches)} matches):*")
-        h2h_text.append(f"• {team1[1]} wins: {team1_wins}")
-        h2h_text.append(f"• {team2[1]} wins: {team2_wins}")
-        h2h_text.append(f"• Draws: {draws}")
-        
-        result = '\n'.join(h2h_text)
-        H2H_CACHE[cache_key] = {'time': now, 'data': result}
-        return result
-        
-    except Exception as e:
-        log.error(f"Error parsing H2H: {e}")
-        return "Error loading head-to-head history."
 
 # === NEW: TOP SCORERS ===
 def get_top_scorers(league_name):
@@ -481,6 +331,7 @@ def get_top_scorers(league_name):
     
     try:
         scorers_text = [f"*{LEAGUE_DISPLAY_NAMES.get(lid, league_name.title())} - Top Scorers* ⚽\n"]
+        scorers_text.append("═" * 40)
         
         for i, scorer in enumerate(data['scorers'][:10]):  # Top 10 scorers
             player_name = scorer['player']['name']
@@ -531,6 +382,7 @@ def get_current_matchday(league_name):
     
     try:
         matchday_text = [f"*{LEAGUE_DISPLAY_NAMES.get(lid, league_name.title())} - Matchday {current_matchday}* 📅\n"]
+        matchday_text.append("═" * 40)
         
         for match in data['matches'][:8]:  # First 8 matches
             home_team = match['homeTeam']['name']
@@ -538,7 +390,9 @@ def get_current_matchday(league_name):
             date_str = match['utcDate'][:10]
             time_str = match['utcDate'][11:16]
             
-            matchday_text.append(f"`{date_str} {time_str} UTC`\n{home_team} vs {away_team}\n")
+            matchday_text.append(f"`📅 {date_str} ⏰ {time_str} UTC`")
+            matchday_text.append(f"**{home_team}** vs **{away_team}**")
+            matchday_text.append("─" * 30)
         
         result = '\n'.join(matchday_text)
         MATCHDAY_CACHE[cache_key] = {'time': now, 'data': result}
@@ -547,6 +401,191 @@ def get_current_matchday(league_name):
     except Exception as e:
         log.error(f"Error parsing matchday: {e}")
         return "Error loading matchday fixtures."
+
+# === NEW: LIVE SCORES ===
+def get_live_scores():
+    cache_key = "live_scores"
+    now = time.time()
+    
+    if cache_key in LIVE_SCORES_CACHE and now - LIVE_SCORES_CACHE[cache_key]['time'] < CACHE_DURATIONS['live']:
+        return LIVE_SCORES_CACHE[cache_key]['data']
+    
+    try:
+        data = safe_get(f"{API_BASE}/matches", {'status': 'LIVE', 'limit': 20})
+        if not data or 'matches' not in data or not data['matches']:
+            return "No live matches at the moment."
+        
+        live_text = ["*⚽ LIVE SCORES ⚽*\n"]
+        live_text.append("═" * 40)
+        
+        for match in data['matches'][:10]:  # First 10 live matches
+            home_team = match['homeTeam']['name']
+            away_team = match['awayTeam']['name']
+            home_score = match['score']['fullTime']['home'] or 0
+            away_score = match['score']['fullTime']['away'] or 0
+            minute = match.get('minute', 'LIVE')
+            competition = match['competition']['name']
+            
+            live_text.append(f"**{competition}**")
+            live_text.append(f"🕒 **{minute}'**")
+            live_text.append(f"**{home_team}** {home_score} - {away_score} **{away_team}**")
+            live_text.append("─" * 30)
+        
+        result = '\n'.join(live_text)
+        LIVE_SCORES_CACHE[cache_key] = {'time': now, 'data': result}
+        return result
+        
+    except Exception as e:
+        log.error(f"Error fetching live scores: {e}")
+        return "Error fetching live scores."
+
+# === NEW: FANTASY PREMIER LEAGUE (PUBLIC API - NO LOGIN REQUIRED) ===
+def get_fpl_data():
+    cache_key = "fpl_data"
+    now = time.time()
+    
+    if cache_key in FPL_CACHE and now - FPL_CACHE[cache_key]['time'] < CACHE_DURATIONS['fpl']:
+        return FPL_CACHE[cache_key]['data']
+    
+    try:
+        # Get current gameweek from public API
+        bootstrap = requests.get(f"{FPL_BASE}/bootstrap-static/", timeout=10).json()
+        current_gw = None
+        for event in bootstrap['events']:
+            if event['is_current']:
+                current_gw = event['id']
+                break
+        
+        if not current_gw:
+            return "Could not fetch FPL data at the moment."
+        
+        # Get top players for current gameweek from elements
+        elements = bootstrap['elements']
+        elements_dict = {elem['id']: elem for elem in elements}
+        
+        # Get player performances - try to get live data, fall back to static
+        try:
+            gw_data = requests.get(f"{FPL_BASE}/event/{current_gw}/live/", timeout=10).json()
+            player_performances = []
+            
+            for element in gw_data['elements']:
+                player_id = element['id']
+                stats = element['stats']
+                player_info = elements_dict.get(player_id, {})
+                
+                if stats['total_points'] > 0:
+                    player_performances.append({
+                        'name': player_info.get('web_name', 'Unknown'),
+                        'team': player_info.get('team', 0),
+                        'points': stats['total_points'],
+                        'goals': stats['goals_scored'],
+                        'assists': stats['assists'],
+                        'bonus': stats['bonus']
+                    })
+        except:
+            # Fallback: use static data from bootstrap
+            player_performances = []
+            for element in elements:
+                if element['event_points'] and element['event_points'] > 0:
+                    player_performances.append({
+                        'name': element.get('web_name', 'Unknown'),
+                        'team': element.get('team', 0),
+                        'points': element['event_points'],
+                        'goals': element.get('goals_scored', 0),
+                        'assists': element.get('assists', 0),
+                        'bonus': element.get('bonus', 0)
+                    })
+        
+        # Sort by points
+        player_performances.sort(key=lambda x: x['points'], reverse=True)
+        
+        if not player_performances:
+            return f"*FPL Gameweek {current_gw}*\n\nNo player data available yet."
+        
+        fpl_text = [f"*🏆 FPL Gameweek {current_gw} - Top Performers* 🏆\n"]
+        fpl_text.append("═" * 50)
+        
+        team_names = {
+            1: 'Arsenal', 2: 'Aston Villa', 3: 'Bournemouth', 4: 'Brentford',
+            5: 'Brighton', 6: 'Chelsea', 7: 'Crystal Palace', 8: 'Everton',
+            9: 'Fulham', 10: 'Leicester', 11: 'Leeds', 12: 'Liverpool',
+            13: 'Man City', 14: 'Man Utd', 15: 'Newcastle', 16: 'Nottm Forest',
+            17: 'Southampton', 18: 'Spurs', 19: 'West Ham', 20: 'Wolves'
+        }
+        
+        for i, player in enumerate(player_performances[:15]):
+            emoji = "🔥" if player['points'] >= 10 else "⭐" if player['points'] >= 7 else "🔸"
+            team = team_names.get(player['team'], 'Unknown')
+            fpl_text.append(
+                f"{emoji} `{player['name'][:15]:15s} - {player['points']:2d} pts "
+                f"({player['goals']}G {player['assists']}A {player['bonus']}B) - {team}`"
+            )
+        
+        result = '\n'.join(fpl_text)
+        FPL_CACHE[cache_key] = {'time': now, 'data': result}
+        return result
+        
+    except Exception as e:
+        log.error(f"Error fetching FPL data: {e}")
+        return "Fantasy Premier League data temporarily unavailable."
+
+# === NEW: RESULTS COMPARISON ===
+def get_todays_results_with_comparison():
+    cache_key = "todays_results"
+    now = time.time()
+    
+    if cache_key in RESULTS_CACHE and now - RESULTS_CACHE[cache_key]['time'] < CACHE_DURATIONS['results']:
+        return RESULTS_CACHE[cache_key]['data']
+    
+    try:
+        today = date.today().isoformat()
+        data = safe_get(f"{API_BASE}/matches", {'dateFrom': today, 'dateTo': today, 'status': 'FINISHED'})
+        
+        if not data or 'matches' not in data or not data['matches']:
+            return "No finished matches today yet."
+        
+        results_text = ["*📊 TODAY'S RESULTS vs PREDICTIONS* 📊\n"]
+        results_text.append("═" * 50)
+        
+        for match in data['matches'][:8]:  # First 8 finished matches
+            home_team = match['homeTeam']['name']
+            away_team = match['awayTeam']['name']
+            home_score = match['score']['fullTime']['home'] or 0
+            away_score = match['score']['fullTime']['away'] or 0
+            competition = match['competition']['name']
+            
+            # Get prediction for comparison
+            hid = match['homeTeam']['id']
+            aid = match['awayTeam']['id']
+            pred = predict_with_ids(hid, aid, home_team, away_team, '', '')
+            
+            # Extract verdict from prediction
+            verdict = "Unknown"
+            for line in pred.split('\n'):
+                if "Verdict:" in line:
+                    verdict = line.split("Verdict:")[1].strip().replace('*', '')
+                    break
+            
+            # Determine if prediction was correct
+            actual_result = "Draw" if home_score == away_score else "Home Win" if home_score > away_score else "Away Win"
+            prediction_correct = "✅" if actual_result in verdict else "❌"
+            
+            results_text.append(f"**{competition}**")
+            results_text.append(f"**{home_team} {home_score} - {away_score} {away_team}**")
+            results_text.append(f"Predicted: {verdict} {prediction_correct}")
+            results_text.append("─" * 40)
+        
+        # Add summary
+        total_matches = len(data['matches'])
+        results_text.append(f"\n*Summary: {total_matches} matches completed today*")
+        
+        result = '\n'.join(results_text)
+        RESULTS_CACHE[cache_key] = {'time': now, 'data': result}
+        return result
+        
+    except Exception as e:
+        log.error(f"Error fetching results: {e}")
+        return "Error loading today's results."
 
 # === SAFE GET ===
 def safe_get(url, params=None):
@@ -667,29 +706,48 @@ def auto_detect_league(hid, aid):
         return lid, LEAGUES_CACHE.get(lid, "League")
     return 0, "Unknown League"
 
-# === WEIGHTED STATS ===
+# === IMPROVED WEIGHTED STATS WITH BETTER GOAL DISTRIBUTION ===
 def get_weighted_stats(team_id, is_home):
     cache_key = f"stats_{team_id}_{'h' if is_home else 'a'}"
     now = time.time()
     if cache_key in TEAM_CACHE and now - TEAM_CACHE[cache_key]['time'] < 3600:
         return TEAM_CACHE[cache_key]['data']
-    data = safe_get(f"{API_BASE}/teams/{team_id}/matches", {'status': 'FINISHED', 'limit': 6})
+    data = safe_get(f"{API_BASE}/teams/{team_id}/matches", {'status': 'FINISHED', 'limit': 8})
     if not data or len(data.get('matches', [])) < 3:
-        return (1.8, 1.0) if is_home else (1.2, 1.5)
+        # More realistic default values that allow for more goals
+        return (2.2, 1.3) if is_home else (1.6, 1.8)
+    
     gf, ga, weights = [], [], []
-    for i, m in enumerate(reversed(data['matches'][:6])):
+    for i, m in enumerate(reversed(data['matches'][:8])):
         try:
             home_id = m['homeTeam']['id']
             sh = m['score']['fullTime']['home'] or 0
             sa = m['score']['fullTime']['away'] or 0
-            weight = 2.0 if i < 2 else 1.0
+            # More balanced weighting
+            weight = 1.5 if i < 3 else 1.2 if i < 6 else 1.0
             if home_id == team_id:
-                gf.append(sh * weight); ga.append(sa * weight); weights.append(weight)
+                gf.append(sh * weight)
+                ga.append(sa * weight)
+                weights.append(weight)
             else:
-                gf.append(sa * weight); ga.append(sh * weight); weights.append(weight)
+                gf.append(sa * weight)
+                ga.append(sh * weight)
+                weights.append(weight)
         except: pass
-    total_weight = sum(weights)
-    stats = (round(sum(gf)/total_weight, 2), round(sum(ga)/total_weight, 2)) if total_weight > 0 else ((1.8, 1.0) if is_home else (1.2, 1.5))
+    
+    total_weight = sum(weights) if weights else 1
+    avg_gf = sum(gf) / total_weight
+    avg_ga = sum(ga) / total_weight
+    
+    # Apply home/away adjustment with more variance
+    if is_home:
+        avg_gf = avg_gf * 1.15  # Increased home advantage
+        avg_ga = avg_ga * 0.9
+    else:
+        avg_gf = avg_gf * 0.85
+        avg_ga = avg_ga * 1.1
+    
+    stats = (round(max(avg_gf, 0.8), 2), round(max(avg_ga, 0.8), 2))
     TEAM_CACHE[cache_key] = {'time': now, 'data': stats}
     save_cache()
     return stats
@@ -724,17 +782,35 @@ def get_market_odds(hname, aname):
     except:
         return None
 
-# === REAL 50×500 SIMS ===
+# === IMPROVED SIMULATION WITH BETTER GOAL DISTRIBUTION ===
 def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
     random.seed(seed)
     np.random.seed(seed)
-    home_xg = (h_gf * a_ga * 1.1) ** 0.5 * random.uniform(0.9, 1.1)
-    away_xg = (a_gf * h_ga * 0.9) ** 0.5 * random.uniform(0.9, 1.1)
-    if home_xg < 2.0 and away_xg < 2.0:
-        tau = 1 - 0.05 * home_xg * away_xg
-        home_xg *= tau; away_xg *= tau
+    
+    # Enhanced goal expectation calculation with more variance
+    home_attack = h_gf * 1.1  # Home advantage
+    away_attack = a_gf * 0.95  # Away disadvantage
+    
+    home_defense = h_ga * 0.9  # Home defensive boost
+    away_defense = a_ga * 1.1  # Away defensive weakness
+    
+    # More dynamic xG calculation with higher potential for goals
+    home_xg = (home_attack * away_defense * 1.2) ** 0.6 * random.uniform(0.7, 1.4)
+    away_xg = (away_attack * home_defense * 0.9) ** 0.6 * random.uniform(0.7, 1.4)
+    
+    # Add more randomness for high-scoring games
+    if random.random() < 0.1:  # 10% chance for high-scoring game
+        home_xg *= random.uniform(1.2, 2.0)
+        away_xg *= random.uniform(1.2, 2.0)
+    
+    # Ensure minimum xG values
+    home_xg = max(home_xg, 0.3)
+    away_xg = max(away_xg, 0.3)
+    
+    # Use Poisson distribution for goals
     hg = np.random.poisson(home_xg, SIMS_PER_MODEL)
     ag = np.random.poisson(away_xg, SIMS_PER_MODEL)
+    
     return hg, ag
 
 def ensemble_100_models(h_gf, h_ga, a_gf, a_ga):
@@ -746,12 +822,25 @@ def ensemble_100_models(h_gf, h_ga, a_gf, a_ga):
         for hg, ag in results:
             all_home_goals.extend(hg)
             all_away_goals.extend(ag)
+    
     total_sims = len(all_home_goals) if all_home_goals else 1
     home_win = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h > a) / total_sims
     draw = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h == a) / total_sims
     away_win = sum(1 for h, a in zip(all_home_goals, all_away_goals) if h < a) / total_sims
-    score_counts = Counter(zip(all_home_goals, all_away_goals)) if all_home_goals else Counter({(1,0):1})
-    most_likely = score_counts.most_common(1)[0][0]
+    
+    # More sophisticated score prediction
+    score_counts = Counter(zip(all_home_goals, all_away_goals))
+    if score_counts:
+        most_likely = score_counts.most_common(1)[0][0]
+        # Ensure we don't always get low scores
+        if most_likely[0] + most_likely[1] < 2 and random.random() < 0.3:
+            # Sometimes show a higher scoring alternative
+            high_scoring = [score for score in score_counts if score[0] + score[1] >= 3]
+            if high_scoring:
+                most_likely = random.choice(high_scoring)
+    else:
+        most_likely = (1, 1)
+    
     return {
         'home_win': round(home_win * 100),
         'draw': round(draw * 100),
@@ -759,21 +848,34 @@ def ensemble_100_models(h_gf, h_ga, a_gf, a_ga):
         'score': f"{most_likely[0]}-{most_likely[1]}"
     }
 
-# === VERDICT (NO BIAS) ===
+# === IMPROVED VERDICT (LESS BIASED) ===
 def get_verdict(model, market=None):
     h, d, a = model['home_win'], model['draw'], model['away_win']
-    if market and market.get('home') and market.get('away'):
-        mh = 1/market['home']; ma = 1/market['away']
-        md = 1/market['draw'] if market.get('draw') else (mh + ma) * 0.1
+    
+    # Only use market odds if they're available and reasonable
+    if market and market.get('home') and market.get('away') and market.get('draw'):
+        mh = 1/market['home']
+        ma = 1/market['away']
+        md = 1/market['draw']
         total = mh + md + ma
-        if total > 0:
-            h = int(h * 0.7 + (mh/total*100 * 0.3))
-            d = int(d * 0.7 + (md/total*100 * 0.3))
-            a = int(a * 0.7 + (ma/total*100 * 0.3))
+        if total > 0.8:  # Only use if market probabilities make sense
+            # Less aggressive blending (40% market, 60% model)
+            h = int(h * 0.6 + (mh/total*100 * 0.4))
+            d = int(d * 0.6 + (md/total*100 * 0.4))
+            a = int(a * 0.6 + (ma/total*100 * 0.4))
+    
+    # Find the maximum with some tolerance for draws
     max_pct = max(h, d, a)
-    if d == max_pct: return "Draw", h, d, a
-    elif h == max_pct: return "Home Win", h, d, a
-    else: return "Away Win", h, d, a
+    
+    # Give draws a better chance - if draw is close to max, prefer draw for balanced games
+    if d >= max_pct * 0.85 and abs(h - a) < 15:
+        return "Draw", h, d, a
+    elif h == max_pct:
+        return "Home Win", h, d, a
+    elif a == max_pct:
+        return "Away Win", h, d, a
+    else:
+        return "Draw", h, d, a  # Fallback to draw
 
 # === CACHED PREDICTION ===
 def cached_prediction(hid, aid, hname, aname, h_tla, a_tla):
@@ -782,6 +884,7 @@ def cached_prediction(hid, aid, hname, aname, h_tla, a_tla):
     if prediction_key in PREDICTION_CACHE and now - PREDICTION_CACHE[prediction_key]['time'] < CACHE_DURATIONS['predictions']:
         log.info(f"Using cached prediction for {hname} vs {aname}")
         return PREDICTION_CACHE[prediction_key]['data']
+    
     lid, league_name = auto_detect_league(hid, aid)
     h_gf, h_ga = get_weighted_stats(hid, True)
     a_gf, a_ga = get_weighted_stats(aid, False)
@@ -827,6 +930,7 @@ def get_user_history(user_id):
     if user_id not in USER_HISTORY or not USER_HISTORY[user_id]:
         return "No prediction history yet. Make some predictions first!"
     history_text = ["*Your Recent Predictions:* 📊"]
+    history_text.append("═" * 40)
     for i, pred in enumerate(reversed(USER_HISTORY[user_id])):
         match = pred['match']
         prediction = pred['prediction']
@@ -835,13 +939,14 @@ def get_user_history(user_id):
         verdict_line = next((line for line in lines if "Verdict:" in line), "Verdict: Unknown")
         verdict = verdict_line.split("Verdict:")[1].strip() if "Verdict:" in verdict_line else "Unknown"
         history_text.append(f"{i+1}. {match} → {verdict} ({time_str})")
+        history_text.append("─" * 30)
     return '\n'.join(history_text)
 
 # === PREDICT (USES CACHED VERSION) ===
 def predict_with_ids(hid, aid, hname, aname, h_tla, a_tla):
     return cached_prediction(hid, aid, hname, aname, h_tla, a_tla)
 
-# === LEAGUE FIXTURES ===
+# === IMPROVED LEAGUE FIXTURES WITH BETTER FORMATTING ===
 def get_league_fixtures(league_name):
     lid = LEAGUE_MAP.get(league_name.lower())
     if not lid:
@@ -852,6 +957,7 @@ def get_league_fixtures(league_name):
     fixtures = []
     for m in data['matches'][:5]:
         date = m['utcDate'][:10]
+        time_str = m['utcDate'][11:16]
         home = m['homeTeam']['name']
         away = m['awayTeam']['name']
         hid = m['homeTeam']['id']
@@ -859,8 +965,14 @@ def get_league_fixtures(league_name):
         pred = predict_with_ids(hid, aid, home, away, '', '')
         pred_lines = pred.splitlines()
         body = '\n'.join(pred_lines[2:]) if len(pred_lines) > 2 else pred
-        fixtures.append(f"*{date}*\n{home} vs {away}\n{body}")
-    return '\n\n'.join(fixtures)
+        
+        fixtures.append(f"📅 *{date}* ⏰ *{time_str} UTC*")
+        fixtures.append(f"**{home}** vs **{away}**")
+        fixtures.append("─" * 40)
+        fixtures.append(body)
+        fixtures.append("═" * 50)
+    
+    return '\n'.join(fixtures)
 
 # === FUN LOADING ANIMATIONS ===
 def fun_loading(chat_id, base_text="Loading", reply_to_message_id=None, stages_count=3):
@@ -891,123 +1003,128 @@ def fun_loading(chat_id, base_text="Loading", reply_to_message_id=None, stages_c
             pass
     return msg
 
-# === NEW: STANDINGS COMMAND ===
+# === NEW: LEAGUE SELECTION FOR STANDINGS ===
+def show_standings_leagues(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    leagues = [
+        ("Premier League", "premier league"),
+        ("La Liga", "la liga"),
+        ("Bundesliga", "bundesliga"),
+        ("Serie A", "serie a"),
+        ("Ligue 1", "ligue 1"),
+        ("Champions League", "champions"),
+        ("Europa League", "europa"),
+        ("Championship", "championship")
+    ]
+    
+    for name, key in leagues:
+        buttons.append(types.InlineKeyboardButton(name, callback_data=f"standings_{key}"))
+    
+    # Add buttons in rows of 2
+    for i in range(0, len(buttons), 2):
+        if i + 1 < len(buttons):
+            markup.add(buttons[i], buttons[i+1])
+        else:
+            markup.add(buttons[i])
+    
+    markup.add(types.InlineKeyboardButton("⬅️ Back", callback_data="menu_2"))
+    
+    bot.send_message(
+        message.chat.id,
+        "📊 *Select League for Standings:*",
+        reply_markup=markup,
+        parse_mode='Markdown'
+    )
+
+# === NEW: LEAGUE SELECTION FOR TOP SCORERS ===
+def show_scorers_leagues(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    leagues = [
+        ("Premier League", "premier league"),
+        ("La Liga", "la liga"), 
+        ("Bundesliga", "bundesliga"),
+        ("Serie A", "serie a"),
+        ("Ligue 1", "ligue 1"),
+        ("Champions League", "champions"),
+        ("Europa League", "europa")
+    ]
+    
+    for name, key in leagues:
+        buttons.append(types.InlineKeyboardButton(name, callback_data=f"scorers_{key}"))
+    
+    for i in range(0, len(buttons), 2):
+        if i + 1 < len(buttons):
+            markup.add(buttons[i], buttons[i+1])
+        else:
+            markup.add(buttons[i])
+    
+    markup.add(types.InlineKeyboardButton("⬅️ Back", callback_data="menu_2"))
+    
+    bot.send_message(
+        message.chat.id,
+        "⚽ *Select League for Top Scorers:*",
+        reply_markup=markup,
+        parse_mode='Markdown'
+    )
+
+# === STANDINGS COMMAND ===
 @bot.message_handler(commands=['standings'])
 def standings_command(m):
-    if len(m.text.split()) < 2:
-        bot.reply_to(m, 
-            "Please specify a league. Examples:\n"
-            "• `/standings premier league`\n"
-            "• `/standings la liga`\n" 
-            "• `/standings champions`\n"
-            "• `/standings bundesliga`",
-            parse_mode='Markdown'
-        )
-        return
-    
-    league_name = ' '.join(m.text.split()[1:])
-    loading = fun_loading(m.chat.id, "Fetching standings...", reply_to_message_id=m.message_id, stages_count=2)
-    standings = get_league_standings(league_name)
-    try:
-        bot.edit_message_text(
-            chat_id=m.chat.id,
-            message_id=loading.message_id,
-            text=standings,
-            parse_mode='Markdown'
-        )
-    except Exception:
-        bot.send_message(m.chat.id, standings, parse_mode='Markdown')
+    show_standings_leagues(m)
 
-# === NEW: TEAM PROFILE COMMAND ===
-@bot.message_handler(commands=['team'])
-def team_profile_command(m):
-    if len(m.text.split()) < 2:
-        bot.reply_to(m, 
-            "Please specify a team. Examples:\n"
-            "• `/team man city`\n"
-            "• `/team real madrid`\n"
-            "• `/team bayern munich`",
-            parse_mode='Markdown'
-        )
-        return
-    
-    team_name = ' '.join(m.text.split()[1:])
-    loading = fun_loading(m.chat.id, "Getting team profile...", reply_to_message_id=m.message_id, stages_count=2)
-    profile = get_team_profile(team_name)
-    try:
-        bot.edit_message_text(
-            chat_id=m.chat.id,
-            message_id=loading.message_id,
-            text=profile,
-            parse_mode='Markdown'
-        )
-    except Exception:
-        bot.send_message(m.chat.id, profile, parse_mode='Markdown')
-
-# === NEW: HEAD-TO-HEAD COMMAND ===
-@bot.message_handler(commands=['h2h'])
-def h2h_command(m):
-    if len(m.text.split()) < 4 or ' vs ' not in m.text:
-        bot.reply_to(m,
-            "Please specify two teams. Examples:\n"
-            "• `/h2h man city vs liverpool`\n"
-            "• `/h2h barcelona vs real madrid`\n"
-            "• `/h2h arsenal vs tottenham`",
-            parse_mode='Markdown'
-        )
-        return
-    
-    # Extract team names
-    parts = m.text.split(' vs ')
-    if len(parts) < 2:
-        bot.reply_to(m, "Please use format: `/h2h team1 vs team2`", parse_mode='Markdown')
-        return
-    
-    team1 = parts[0].split()[1:]  # Remove '/h2h'
-    team2 = parts[1].split()
-    
-    team1_name = ' '.join(team1).strip()
-    team2_name = ' '.join(team2).strip()
-    
-    loading = fun_loading(m.chat.id, "Checking history...", reply_to_message_id=m.message_id, stages_count=2)
-    h2h = get_head_to_head(team1_name, team2_name)
-    try:
-        bot.edit_message_text(
-            chat_id=m.chat.id,
-            message_id=loading.message_id,
-            text=h2h,
-            parse_mode='Markdown'
-        )
-    except Exception:
-        bot.send_message(m.chat.id, h2h, parse_mode='Markdown')
-
-# === NEW: TOP SCORERS COMMAND ===
+# === TOP SCORERS COMMAND ===
 @bot.message_handler(commands=['topscorers'])
 def topscorers_command(m):
-    if len(m.text.split()) < 2:
-        bot.reply_to(m,
-            "Please specify a league. Examples:\n"
-            "• `/topscorers premier league`\n"
-            "• `/topscorers la liga`\n"
-            "• `/topscorers champions`",
-            parse_mode='Markdown'
-        )
-        return
-    
-    league_name = ' '.join(m.text.split()[1:])
-    loading = fun_loading(m.chat.id, "Fetching top scorers...", reply_to_message_id=m.message_id, stages_count=2)
-    scorers = get_top_scorers(league_name)
+    show_scorers_leagues(m)
+
+# === NEW: LIVE SCORES COMMAND ===
+@bot.message_handler(commands=['live'])
+def live_scores_command(m):
+    loading = fun_loading(m.chat.id, "Checking live matches...", reply_to_message_id=m.message_id, stages_count=2)
+    live_scores = get_live_scores()
     try:
         bot.edit_message_text(
             chat_id=m.chat.id,
             message_id=loading.message_id,
-            text=scorers,
+            text=live_scores,
             parse_mode='Markdown'
         )
     except Exception:
-        bot.send_message(m.chat.id, scorers, parse_mode='Markdown')
+        bot.send_message(m.chat.id, live_scores, parse_mode='Markdown')
 
-# === NEW: MATCHDAY COMMAND ===
+# === NEW: FPL COMMAND ===
+@bot.message_handler(commands=['fpl'])
+def fpl_command(m):
+    loading = fun_loading(m.chat.id, "Fetching FPL data...", reply_to_message_id=m.message_id, stages_count=2)
+    fpl_data = get_fpl_data()
+    try:
+        bot.edit_message_text(
+            chat_id=m.chat.id,
+            message_id=loading.message_id,
+            text=fpl_data,
+            parse_mode='Markdown'
+        )
+    except Exception:
+        bot.send_message(m.chat.id, fpl_data, parse_mode='Markdown')
+
+# === NEW: RESULTS COMMAND ===
+@bot.message_handler(commands=['results'])
+def results_command(m):
+    loading = fun_loading(m.chat.id, "Checking today's results...", reply_to_message_id=m.message_id, stages_count=2)
+    results = get_todays_results_with_comparison()
+    try:
+        bot.edit_message_text(
+            chat_id=m.chat.id,
+            message_id=loading.message_id,
+            text=results,
+            parse_mode='Markdown'
+        )
+    except Exception:
+        bot.send_message(m.chat.id, results, parse_mode='Markdown')
+
+# === MATCHDAY COMMAND ===
 @bot.message_handler(commands=['matchday'])
 def matchday_command(m):
     if len(m.text.split()) < 2:
@@ -1033,7 +1150,7 @@ def matchday_command(m):
     except Exception:
         bot.send_message(m.chat.id, matchday, parse_mode='Markdown')
 
-# === ENHANCED /today ===
+# === ENHANCED /today WITH BETTER FORMATTING ===
 def run_today(chat_id, reply_to_id=None):
     uid = chat_id
     if uid in LOADING_MSGS:
@@ -1056,7 +1173,7 @@ def run_today(chat_id, reply_to_id=None):
                 pred = predict_with_ids(hid, aid, hname, aname, '', '')
                 pred_lines = pred.splitlines()
                 body = '\n'.join(pred_lines[2:]) if len(pred_lines) > 2 else pred
-                results.append(f"`{t} UTC` {hname} vs {aname}\n{body}")
+                results.append(f"📅 *{today}* ⏰ *{t} UTC*\n**{hname}** vs **{aname}**\n{body}\n{'═'*50}")
             return results, len(data['matches'])
         with ThreadPoolExecutor(max_workers=8) as executor:
             futures = {executor.submit(fetch_and_predict, lid, name): name for name, lid in LEAGUE_MAP.items() if ' ' in name}
@@ -1065,16 +1182,16 @@ def run_today(chat_id, reply_to_id=None):
                 try:
                     matches, total = future.result()
                     if matches:
-                        all_fixtures.append(f"**{league_name.title()}**")
+                        all_fixtures.append(f"🏆 **{league_name.title()}** 🏆")
                         all_fixtures.extend(matches)
                         if total > 3:
-                            all_fixtures.append(f"_+{total-3} more..._")
+                            all_fixtures.append(f"_+{total-3} more matches..._")
                         all_fixtures.append("")
                 except: pass
         if not all_fixtures:
             result = "No fixtures today in major leagues."
         else:
-            result = "*Today's Fixtures & Predictions*\n\n" + "\n".join(all_fixtures).strip()
+            result = "*📅 TODAY'S FIXTURES & PREDICTIONS* 📅\n\n" + "\n".join(all_fixtures).strip()
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=loading.message_id,
@@ -1117,11 +1234,12 @@ def run_users(chat_id, reply_to_id=None):
             chat_id=chat_id,
             message_id=loading_msg.message_id,
             text=(
-                f"**Community Stats** 📊\n\n"
+                f"**Community Stats** 📊\n"
+                f"═══════════════════════\n\n"
                 f"👥 Active Users: `{active}`\n"
                 f"📈 Predictions Made: `{total_predictions}`\n\n"
                 f"⚽ **Now with enhanced features!**\n"
-                f"• League standings\n• Team profiles\n• Head-to-head\n• Top scorers\n• Matchday fixtures"
+                f"• Live scores ⚡\n• FPL integration 🏆\n• Results comparison 📊\n• Better formatting 🎨"
             ),
             parse_mode='Markdown'
         )
@@ -1189,14 +1307,17 @@ def show_menu_page(m, page=1):
         ]
         row2 = [
             types.InlineKeyboardButton("History", callback_data="cmd_/history"),
-            types.InlineKeyboardButton("Standings", callback_data="cmd_/standings")
+            types.InlineKeyboardButton("Standings", callback_data="standings_menu")
         ]
         row3 = [
-            types.InlineKeyboardButton("Team Profile", callback_data="cmd_/team"),
-            types.InlineKeyboardButton("Top Scorers", callback_data="cmd_/topscorers")
+            types.InlineKeyboardButton("Top Scorers", callback_data="scorers_menu"),
+            types.InlineKeyboardButton("Live Scores", callback_data="cmd_/live")
         ]
         row4 = [types.InlineKeyboardButton("Help", callback_data="help_1")]
-        nav_row = [types.InlineKeyboardButton("Prev ⬅️", callback_data="menu_1")]
+        nav_row = [
+            types.InlineKeyboardButton("Prev ⬅️", callback_data="menu_1"),
+            types.InlineKeyboardButton("Next ➡️", callback_data="menu_3")
+        ]
         markup.add(*row1, *row2, *row3, *row4, *nav_row)
     
     elif page == 3:
@@ -1205,10 +1326,14 @@ def show_menu_page(m, page=1):
             f"*Page 3: Advanced Features*"
         )
         row1 = [
-            types.InlineKeyboardButton("Head-to-Head", callback_data="cmd_/h2h"),
-            types.InlineKeyboardButton("Matchday", callback_data="cmd_/matchday")
+            types.InlineKeyboardButton("FPL", callback_data="cmd_/fpl"),
+            types.InlineKeyboardButton("Results", callback_data="cmd_/results")
         ]
         row2 = [
+            types.InlineKeyboardButton("Matchday", callback_data="cmd_/matchday"),
+            types.InlineKeyboardButton("Live Scores", callback_data="cmd_/live")
+        ]
+        row3 = [
             types.InlineKeyboardButton("Today", callback_data="cmd_/today"),
             types.InlineKeyboardButton("Users", callback_data="cmd_/users")
         ]
@@ -1216,7 +1341,7 @@ def show_menu_page(m, page=1):
             types.InlineKeyboardButton("Prev ⬅️", callback_data="menu_2"),
             types.InlineKeyboardButton("Close", callback_data="menu_close")
         ]
-        markup.add(*row1, *row2, *nav_row)
+        markup.add(*row1, *row2, *row3, *nav_row)
     
     bot.send_message(m.chat.id, text, reply_markup=markup, parse_mode='Markdown')
 
@@ -1235,9 +1360,9 @@ def build_help_page(page):
             "• `/premierleague` etc — League predictions\n"
             "• `Team A vs Team B` — Specific match prediction\n\n"
             "*New Features*\n"
-            "• `/standings <league>` — League table\n"
-            "• `/team <team>` — Team profile & form\n"
-            "• `/topscorers <league>` — Top goal scorers\n\n"
+            "• `/standings` — League table selector\n"
+            "• `/topscorers` — Top goal scorers selector\n"
+            "• `/live` — Live match scores\n\n"
             "_Tap Next for more._"
         )
         markup.add(next_btn, close_btn)
@@ -1245,7 +1370,8 @@ def build_help_page(page):
         text = (
             "📃 *KickVision — Help (Page 2/3)*\n\n"
             "*Advanced Commands*\n"
-            "• `/h2h <team1> vs <team2>` — Head-to-head history\n"
+            "• `/fpl` — Fantasy Premier League top performers\n"
+            "• `/results` — Today's results vs predictions\n"
             "• `/matchday <league>` — Current matchday fixtures\n"
             "• `/history` — Your prediction history\n"
             "• `/users` — Community statistics\n\n"
@@ -1304,57 +1430,42 @@ def callback_handler(call):
             user_id = call.from_user.id
             history_text = get_user_history(user_id)
             bot.send_message(chat_id, history_text, parse_mode='Markdown')
-        elif cmd == "/standings":
-            bot.send_message(chat_id,
-                "📊 *League Standings*\n\n"
-                "Use: `/standings <league>`\n\n"
-                "Examples:\n"
-                "• `/standings premier league`\n"
-                "• `/standings la liga`\n"
-                "• `/standings champions`\n"
-                "• `/standings bundesliga`",
-                parse_mode='Markdown'
-            )
-        elif cmd == "/team":
-            bot.send_message(chat_id,
-                "🏆 *Team Profile*\n\n"
-                "Use: `/team <team name>`\n\n"
-                "Examples:\n"
-                "• `/team man city`\n"
-                "• `/team real madrid`\n"
-                "• `/team bayern munich`",
-                parse_mode='Markdown'
-            )
-        elif cmd == "/topscorers":
-            bot.send_message(chat_id,
-                "⚽ *Top Scorers*\n\n"
-                "Use: `/topscorers <league>`\n\n"
-                "Examples:\n"
-                "• `/topscorers premier league`\n"
-                "• `/topscorers la liga`\n"
-                "• `/topscorers champions`",
-                parse_mode='Markdown'
-            )
-        elif cmd == "/h2h":
-            bot.send_message(chat_id,
-                "⚔️ *Head-to-Head*\n\n"
-                "Use: `/h2h <team1> vs <team2>`\n\n"
-                "Examples:\n"
-                "• `/h2h man city vs liverpool`\n"
-                "• `/h2h barcelona vs real madrid`\n"
-                "• `/h2h arsenal vs tottenham`",
-                parse_mode='Markdown'
-            )
-        elif cmd == "/matchday":
-            bot.send_message(chat_id,
-                "📅 *Current Matchday*\n\n"
-                "Use: `/matchday <league>`\n\n"
-                "Examples:\n"
-                "• `/matchday premier league`\n"
-                "• `/matchday la liga`\n"
-                "• `/matchday bundesliga`",
-                parse_mode='Markdown'
-            )
+        elif cmd == "/live":
+            loading = fun_loading(chat_id, "Checking live matches...", reply_to_message_id=reply_to_id, stages_count=2)
+            live_scores = get_live_scores()
+            try:
+                bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=loading.message_id,
+                    text=live_scores,
+                    parse_mode='Markdown'
+                )
+            except Exception:
+                bot.send_message(chat_id, live_scores, parse_mode='Markdown')
+        elif cmd == "/fpl":
+            loading = fun_loading(chat_id, "Fetching FPL data...", reply_to_message_id=reply_to_id, stages_count=2)
+            fpl_data = get_fpl_data()
+            try:
+                bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=loading.message_id,
+                    text=fpl_data,
+                    parse_mode='Markdown'
+                )
+            except Exception:
+                bot.send_message(chat_id, fpl_data, parse_mode='Markdown')
+        elif cmd == "/results":
+            loading = fun_loading(chat_id, "Checking today's results...", reply_to_message_id=reply_to_id, stages_count=2)
+            results = get_todays_results_with_comparison()
+            try:
+                bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=loading.message_id,
+                    text=results,
+                    parse_mode='Markdown'
+                )
+            except Exception:
+                bot.send_message(chat_id, results, parse_mode='Markdown')
         else:
             real_msg = types.Message(
                 message_id=call.message.message_id,
@@ -1368,6 +1479,40 @@ def callback_handler(call):
             real_msg.text = cmd
             dynamic_league_handler(real_msg)
 
+    elif data.startswith("standings_"):
+        if data == "standings_menu":
+            show_standings_leagues(call.message)
+        else:
+            league_name = data[10:]
+            loading = fun_loading(chat_id, "Fetching standings...", reply_to_message_id=reply_to_id, stages_count=2)
+            standings = get_league_standings(league_name)
+            try:
+                bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=loading.message_id,
+                    text=standings,
+                    parse_mode='Markdown'
+                )
+            except Exception:
+                bot.send_message(chat_id, standings, parse_mode='Markdown')
+    
+    elif data.startswith("scorers_"):
+        if data == "scorers_menu":
+            show_scorers_leagues(call.message)
+        else:
+            league_name = data[8:]
+            loading = fun_loading(chat_id, "Fetching top scorers...", reply_to_message_id=reply_to_id, stages_count=2)
+            scorers = get_top_scorers(league_name)
+            try:
+                bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=loading.message_id,
+                    text=scorers,
+                    parse_mode='Markdown'
+                )
+            except Exception:
+                bot.send_message(chat_id, scorers, parse_mode='Markdown')
+    
     elif data.startswith("menu_"):
         if data == "menu_close":
             try:
@@ -1541,10 +1686,10 @@ def webhook():
 
 @app.route('/')
 def index():
-    return 'KickVision Bot v1.2.0 - Complete Free Edition is running!'
+    return 'KickVision Bot v1.3.0 - Enhanced Free Edition is running!'
 
 if __name__ == '__main__':
-    log.info("KickVision v1.2.0 — COMPLETE FREE EDITION READY")
+    log.info("KickVision v1.3.0 — ENHANCED FREE EDITION READY")
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
