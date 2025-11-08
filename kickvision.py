@@ -26,6 +26,9 @@ import telebot
 from telebot import types
 from flask import Flask, request
 
+# === FLASK APP MUST BE DEFINED FIRST ===
+app = Flask(__name__)
+
 # === CONFIG ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")  # Free tier has limited requests
@@ -136,7 +139,21 @@ def load_team_aliases():
         log.info(f"Loaded {len(TEAM_ALIASES)} aliases")
     except Exception as e:
         log.exception("ZIP ERROR - using minimal set")
-        load_team_aliases()  # Fallback to minimal
+        # Fallback to minimal
+        minimal_teams = [
+            "Manchester United|Man Utd|Man United|MUFC",
+            "Manchester City|Man City|MCFC",
+            "Liverpool|LFC",
+            "Chelsea|CFC",
+            "Arsenal|AFC",
+        ]
+        for line in minimal_teams:
+            parts = [p.strip() for p in re.split(r'\s*[|,]\s*', line.strip()) if p.strip()]
+            if not parts: continue
+            official = parts[0]
+            for alias in parts:
+                TEAM_ALIASES[alias.lower()] = official
+            TEAM_ALIASES[official.lower()] = official
 
 load_team_aliases()
 
@@ -616,10 +633,22 @@ def handle_errors(message):
     if message.content_type != 'text':
         bot.reply_to(message, "❌ I only support text messages. Try sending team names like:\n\n`Manchester United vs Liverpool`")
 
-# === HEALTH CHECK ===
+# === FLASK ROUTES ===
 @app.route('/health')
 def health_check():
     return 'OK'
+
+@app.route('/')
+def index():
+    return 'KickVision Bot v1.3.1 - Optimized Edition is running!'
+
+@app.route(f'/{BOT_TOKEN}', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        update = telebot.types.Update.de_json(request.get_data().decode('utf-8'))
+        bot.process_new_updates([update])
+        return 'OK', 200
+    return 'Invalid', 403
 
 # === MAIN ===
 if __name__ == '__main__':
