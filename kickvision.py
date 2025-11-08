@@ -1,334 +1,365 @@
 #!/usr/bin/env python3
 """
-KickVision v1.3.0 — Enhanced Free Edition
-Live scores | FPL | Results comparison | Top scorers | Standings | Better UX
+KickVision v1.0.0 - Aiogram async build (webhook)
+- Requires: pip install aiogram aiohttp requests
+- Env vars:
+    BOT_TOKEN
+    API_KEY
+    RENDER_EXTERNAL_HOSTNAME
+    ADMIN_CHAT_ID (optional comma-separated)
 """
 
-import os
-import re
-import time
-import zipfile
-import logging
-import json
-import random
-from collections import defaultdict, Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, date
-
-import numpy as np
+import os, time, math, random, logging, json, asyncio
+from datetime import date, timedelta, datetime
 import requests
-import difflib
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-import telebot
-from telebot import types
-from flask import Flask, request
+# Aiogram imports
+try:
+    from aiogram import Bot, Dispatcher, types
+    from aiogram.utils.executor import start_webhook
+    from aiohttp import web
+except Exception as e:
+    raise RuntimeError("Install aiogram and aiohttp: pip install aiogram aiohttp")
 
-# ============================= CONFIG =============================
+# Config
+VERSION = "1.0.0"
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
-API_BASE = 'https://api.football-data.org/v4'
-FPL_BASE = 'https://fantasy.premierleague.com/api'
-ZIP_FILE = 'clubs.zip'
-CACHE_FILE = 'team_cache.json'
-LEAGUES_CACHE_FILE = 'leagues_cache.json'
-CACHE_TTL = 86400
-SIMS_PER_MODEL = 500
-TOTAL_MODELS = 50
+RENDER_HOST = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+PORT = int(os.getenv("PORT", 5000))
+WEBHOOK_PATH = f"/{BOT_TOKEN}"
+WEBHOOK_URL = f"https://{RENDER_HOST}{WEBHOOK_PATH}" if RENDER_HOST else None
+ADMIN_CHAT_IDS = [int(x) for x in os.getenv("ADMIN_CHAT_ID","").split(",") if x.strip()]
 
-# ============================= LOGGING =============================
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
-log = logging.getLogger('kickvision')
-logging.getLogger("urllib3").setLevel(logging.WARNING)
-logging.getLogger("requests").setLevel(logging.WARNING)
+if not BOT_TOKEN or not API_KEY:
+    raise RuntimeError("BOT_TOKEN and API_KEY env vars are required")
 
-# ============================= STATE =============================
-user_rate = defaultdict(list)
-TEAM_ALIASES = {}
-TEAM_CACHE = {}
-LEAGUES_CACHE = {}
-PENDING_MATCH = {}
-USER_SESSIONS = set()
-ODDS_CACHE = {}
-LOADING_MSGS = {}
-HELP_STATE = {}
-CANCEL_ALL = set()
+API_BASE = "https://api.football-data.org/v4"
+FPL_BASE = "https://fantasy.premierleague.com/api"
 
-# Caches
-PREDICTION_CACHE = {}
-TEAM_RESOLVE_CACHE = {}
-USER_HISTORY = defaultdict(list)
-LEAGUES_LOADED = {}
-STANDINGS_CACHE = {}
-SCORERS_CACHE = {}
-MATCHDAY_CACHE = {}
-LIVE_SCORES_CACHE = {}
-FPL_CACHE = {}
-RESULTS_CACHE = {}
-
-CACHE_DURATIONS = {
-    'standings': 7200, 'scorers': 43200, 'matchday': 3600,
-    'predictions': 3600, 'live': 300, 'fpl': 1800, 'results': 3600
+LEAGUES = {
+    "premier league": 2021,
+    "champions league": 2001,
+    "la liga": 2014,
+    "bundesliga": 2002,
+    "serie a": 2019,
+    "ligue 1": 2015
 }
+LEAGUE_DISPLAY = {v: k.title() for k, v in LEAGUES.items()}
 
-# Educational & previews
-EDUCATIONAL_TIPS = [...]
-MATCH_PREVIEWS = [...]
+# Caching
+CACHE = {}
+TTL = {'fixtures':300,'teams':3600*12,'standings':1800,'scorers':1800,'predictions':3600,'fpl':1800,'live':60}
 
-# ============================= LEAGUE MAP =============================
-LEAGUE_MAP = { ... }  # same as yours
-LEAGUE_DISPLAY_NAMES = { ... }
+# prediction params
+TOTAL_MODELS=100
+SIMS_PER_MODEL=80
 
-# ============================= ALIASES =============================
-# (same as before – unchanged)
-
-# ============================= HTTP & TELEBOT =============================
+# Logging and session
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+log=logging.getLogger("kickvision")
 session = requests.Session()
-session.headers.update({'X-Auth-Token': API_KEY})
-retries = Retry(total=5, backoff_factor=2, status_forcelist=[429,500,502,503,504])
-session.mount('https://', HTTPAdapter(max_retries=retries))
+session.headers.update({"X-Auth-Token": API_KEY})
 
-bot = telebot.TeleBot(BOT_TOKEN)
-time.sleep(2)
+# helpers
+def cache_get(k):
+    e=CACHE.get(k)
+    if not e: return None
+    val,ts,ttl=e
+    if time.time()-ts>ttl:
+        del CACHE[k]; return None
+    return val
 
-# ============================= CACHE =============================
-# (load_cache, save_cache – unchanged)
+def cache_set(k,v,ttl):
+    CACHE[k]=(v,time.time(),ttl)
 
-# ============================= FAST RESOLVE =============================
-def fast_resolve_alias(name): ...  # same
-
-# ============================= SAFE GET =============================
-def safe_get(url, params=None): ...  # same
-
-# ============================= LEAGUES CACHE =============================
-# (load_leagues_cache, fetch_all_leagues – unchanged)
-
-# ============================= TEAM LOADING =============================
-def get_league_teams_lazy(lid): ...  # same
-def get_league_teams(lid): ...  # same
-
-# ============================= CANDIDATES =============================
-def find_team_candidates(name): ...  # same
-
-# ============================= LEAGUE DETECT =============================
-def auto_detect_league(hid, aid): ...  # same
-
-# ============================= STATS =============================
-def get_weighted_stats(tid, is_home): ...  # same
-
-# ============================= ODDS =============================
-def get_market_odds(hn, an): ...  # same
-
-# ============================= SIMULATION =============================
-def run_single_model(seed, h_gf, h_ga, a_gf, a_ga):
-    random.seed(seed); np.random.seed(seed)
-    hx = (h_gf * a_ga * 1.1) ** 0.5 * random.uniform(0.9, 1.1)
-    ax = (a_gf * h_ga * 0.9) ** 0.5 * random.uniform(0.9, 1.1)
-    if hx < 2.0 and ax < 2.0:
-        tau = 1 - 0.05 * hx * ax
-        hx *= tau; ax *= tau
-    return np.random.poisson(hx, SIMS_PER_MODEL), np.random.poisson(ax, SIMS_PER_MODEL)
-
-def ensemble_models(h_gf, h_ga, a_gf, a_ga):
-    seeds = range(TOTAL_MODELS)
-    all_h, all_a = [], []
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        for hg, ag in ex.map(lambda s: run_single_model(s, h_gf, h_ga, a_gf, a_ga), seeds):
-            all_h.extend(hg); all_a.extend(ag)
-    total = len(all_h)
-    hw = sum(1 for h,a in zip(all_h, all_a) if h > a) / total
-    draw = sum(1 for h,a in zip(all_h, all_a) if h == a) / total
-    aw = 1 - hw - draw
-    counts = Counter(zip(all_h, all_a))
-    most = counts.most_common(1)[0][0]
-    return {
-        'home_win': round(hw * 100),
-        'draw': round(draw * 100),
-        'away_win': round(aw * 100),
-        'score': f"{most[0]}-{most[1]}"
-    }
-
-# ============================= VERDICT =============================
-def get_verdict(model, market=None): ...  # same
-
-# ============================= CACHED PREDICTION =============================
-def cached_prediction(hid, aid, hname, aname, h_tla, a_tla):
-    key = f"pred_{hid}_{aid}"
-    now = time.time()
-    if key in PREDICTION_CACHE and now - PREDICTION_CACHE[key]['time'] < CACHE_DURATIONS['predictions']:
-        return PREDICTION_CACHE[key]['data']
-    lid, lname = auto_detect_league(hid, aid)
-    h_gf, h_ga = get_weighted_stats(hid, True)
-    a_gf, a_ga = get_weighted_stats(aid, False)
-    model = ensemble_models(h_gf, h_ga, a_gf, a_ga)
-    market = get_market_odds(hname, aname)
-    verdict, hp, dp, ap = get_verdict(model, market)
-    result = '\n'.join([
-        f"*{hname} vs {aname}*",
-        f"_{lname}_",
-        "",
-        f"**xG:** `{h_gf:.2f}` — `{a_gf:.2f}`",
-        f"**Win:** `{hp}%` | `{dp}%` | `{ap}%`",
-        "",
-        f"**Most Likely:** `{model['score']}`",
-        f"**Verdict:** *{verdict}*"
-    ])
-    PREDICTION_CACHE[key] = {'time': now, 'data': result}
-    return result
-
-def predict_with_ids(hid, aid, hname, aname, h_tla, a_tla):
-    return cached_prediction(hid, aid, hname, aname, h_tla, a_tla)
-
-# ============================= HISTORY =============================
-def add_to_history(uid, match, pred): ...  # same
-def get_user_history(uid): ...  # same
-
-# ============================= LOADING ANIMATION =============================
-def fun_loading(chat_id, base_text="Loading", reply_to_id=None, stages_count=3):
-    stages = [...]  # your list
-    random.shuffle(stages)
-    msg = bot.send_message(chat_id, f"{base_text}...", reply_to_message_id=reply_to_id, parse_mode='Markdown')
-    for stage in stages[:stages_count]:
-        time.sleep(random.uniform(0.9, 1.4))
-        try: bot.edit_message_text(stage, chat_id, msg.message_id, parse_mode='Markdown')
-        except: pass
-    return msg
-
-# ============================= NEW FEATURES =============================
-def get_live_scores():
-    key = "live_scores"
-    now = time.time()
-    if key in LIVE_SCORES_CACHE and now - LIVE_SCORES_CACHE[key]['time'] < CACHE_DURATIONS['live']:
-        return LIVE_SCORES_CACHE[key]['data']
-    data = safe_get(f"{API_BASE}/matches", {'status': 'LIVE'})
-    if not data or not data.get('matches'): return "No live matches."
-    lines = ["*Live Scores*"]
-    for m in data['matches'][:10]:
-        h = m['homeTeam']['name']; a = m['awayTeam']['name']
-        s = m['score']['fullTime']
-        lines.append(f"`{s['home']}-{s['away']}` *{h} vs {a}*")
-    result = '\n'.join(lines)
-    LIVE_SCORES_CACHE[key] = {'time': now, 'data': result}
-    return result
-
-def get_fpl_data():
-    key = "fpl_data"
-    now = time.time()
-    if key in FPL_CACHE and now - FPL_CACHE[key]['time'] < CACHE_DURATIONS['fpl']:
-        return FPL_CACHE[key]['data']
+def safe_get(url, params=None, timeout=10):
     try:
-        r = requests.get(f"{FPL_BASE}/bootstrap-static/", timeout=10)
-        data = r.json()
-        top = data['elements'][0]
-        name = f"{top['first_name']} {top['second_name']}"
-        pts = top['total_points']
-        result = f"*FPL Top Player*\n\n{name}\n**Points:** {pts}"
-        FPL_CACHE[key] = {'time': now, 'data': result}
-        return result
-    except: return "FPL data unavailable."
+        r = session.get(url, params=params, timeout=timeout)
+        if r.status_code==200:
+            return r.json()
+        else:
+            log.debug(f"API {r.status_code}")
+            return None
+    except Exception:
+        log.exception("safe_get error")
+        return None
 
-def get_todays_results_with_comparison():
-    key = "results"
-    now = time.time()
-    if key in RESULTS_CACHE and now - RESULTS_CACHE[key]['time'] < CACHE_DURATIONS['results']:
-        return RESULTS_CACHE[key]['data']
-    today = date.today().isoformat()
-    lines = ["*Today's Results vs KickVision*"]
-    for lid in [2021, 2014, 2002, 2019, 2015]:
-        data = safe_get(f"{API_BASE}/competitions/{lid}/matches", {'dateFrom': today, 'dateTo': today, 'status': 'FINISHED'})
-        if not data or not data.get('matches'): continue
-        for m in data['matches']:
-            h = m['homeTeam']['name']; a = m['awayTeam']['name']
-            hid = m['homeTeam']['id']; aid = m['awayTeam']['id']
-            s = m['score']['fullTime']
-            if not s['home'] or not s['away']: continue
-            pred = predict_with_ids(hid, aid, h, a, '', '')
-            verdict = [l for l in pred.split('\n') if "Verdict:" in l][0].split("*")[1]
-            actual = "Home Win" if s['home'] > s['away'] else "Draw" if s['home'] == s['away'] else "Away Win"
-            icon = "Correct" if verdict == actual else "Incorrect"
-            lines.append(f"{icon} `{h} {s['home']}-{s['away']} {a}` — *{verdict}*")
-    result = '\n'.join(lines[:15])
-    RESULTS_CACHE[key] = {'time': now, 'data': result}
-    return result
+# data functions (same logic as telebot script)
+def get_upcoming_fixtures(league_id, days=7, limit=6):
+    key=f"fixtures_{league_id}_{days}"
+    cached=cache_get(key)
+    if cached: return cached
+    start=date.today().isoformat(); end=(date.today()+timedelta(days=days)).isoformat()
+    data=safe_get(f"{API_BASE}/competitions/{league_id}/matches", params={"status":"SCHEDULED","dateFrom":start,"dateTo":end})
+    matches = data.get("matches",[])[:limit] if data else []
+    cache_set(key,matches,TTL['fixtures']); return matches
 
-# ============================= COMMANDS =============================
-@bot.message_handler(commands=['live'])
-def live_cmd(m):
-    loading = fun_loading(m.chat.id, "Live scores...", m.message_id)
-    bot.edit_message_text(get_live_scores(), m.chat.id, loading.message_id, parse_mode='Markdown')
+def get_team_recent_stats(team_id,last=6):
+    key=f"team_stats_{team_id}_{last}"; cached=cache_get(key)
+    if cached: return cached
+    data=safe_get(f"{API_BASE}/teams/{team_id}/matches", params={"status":"FINISHED","limit":last})
+    if not data or "matches" not in data: res=(1.3,1.3); cache_set(key,res,TTL['teams']); return res
+    gf=[]; ga=[]
+    for m in data["matches"]:
+        ft = m.get("score",{}).get("fullTime",{})
+        if m["homeTeam"]["id"]==team_id:
+            gf.append(ft.get("home",0)); ga.append(ft.get("away",0))
+        else:
+            gf.append(ft.get("away",0)); ga.append(ft.get("home",0))
+    res=(sum(gf)/len(gf), sum(ga)/len(ga)) if gf else (1.3,1.3)
+    cache_set(key,res,TTL['teams']); return res
 
-@bot.message_handler(commands=['fpl'])
-def fpl_cmd(m):
-    loading = fun_loading(m.chat.id, "FPL data...", m.message_id)
-    bot.edit_message_text(get_fpl_data(), m.chat.id, loading.message_id, parse_mode='Markdown')
+def _poisson_sample(lam):
+    L=math.exp(-lam); k=0; p=1.0
+    while p> L:
+        k+=1; p*=random.random()
+    return k-1
 
-@bot.message_handler(commands=['results'])
-def results_cmd(m):
-    loading = fun_loading(m.chat.id, "Results...", m.message_id)
-    bot.edit_message_text(get_todays_results_with_comparison(), m.chat.id, loading.message_id, parse_mode='Markdown')
+def simulate_model(h_lambda,a_lambda,sims=100, seed=None):
+    if seed is not None: random.seed(seed)
+    hw=dw=aw=0
+    for _ in range(sims):
+        hg=_poisson_sample(h_lambda); ag=_poisson_sample(a_lambda)
+        if hg>ag: hw+=1
+        elif hg==ag: dw+=1
+        else: aw+=1
+    tot=float(sims)
+    return {'home': hw/tot, 'draw': dw/tot, 'away': aw/tot}
 
-# ============================= /start MENU =============================
-@bot.message_handler(commands=['start'])
-def start(m):
-    USER_SESSIONS.add(m.from_user.id)
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("Today", callback_data="cmd_/today"),
-        types.InlineKeyboardButton("Live", callback_data="cmd_/live"),
-        types.InlineKeyboardButton("Results", callback_data="cmd_/results"),
-        types.InlineKeyboardButton("FPL", callback_data="cmd_/fpl"),
-        types.InlineKeyboardButton("Premier League", callback_data="cmd_/premierleague"),
-        types.InlineKeyboardButton("La Liga", callback_data="cmd_/laliga"),
-        types.InlineKeyboardButton("Help", callback_data="help_1")
-    )
-    bot.send_message(m.chat.id, "*KickVision v1.3.0*\nEnhanced Free Edition", reply_markup=markup, parse_mode='Markdown')
+def estimate_lambdas(h_stats,a_stats):
+    h_attack=max(0.1,h_stats[0]); h_def=max(0.1,h_stats[1])
+    a_attack=max(0.1,a_stats[0]); a_def=max(0.1,a_stats[1])
+    home_lambda=(h_attack*a_def)/2.5*1.08
+    away_lambda=(a_attack*h_def)/2.5*0.95
+    return max(0.05,home_lambda), max(0.05,away_lambda)
 
-# ============================= CALLBACK HANDLER =============================
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
-    if not call.from_user: return
-    uid = call.from_user.id
-    if uid in CANCEL_ALL: return
-    bot.answer_callback_query(call.id)
-    data = call.data
+def ensemble_predict(h_stats,a_stats):
+    key=f"ens_{h_stats}_{a_stats}"
+    cached=cache_get(key)
+    if cached: return cached
+    homes=[]; draws=[]; aways=[]
+    base_h, base_a = estimate_lambdas(h_stats,a_stats)
+    for m in range(TOTAL_MODELS):
+        jitter_h=random.uniform(0.85,1.15); jitter_a=random.uniform(0.85,1.15); scale=random.uniform(0.85,1.25)
+        h_l = base_h * jitter_h * scale; a_l = base_a * jitter_a * scale
+        res = simulate_model(h_l,a_l,sims=SIMS_PER_MODEL, seed=(m*13+int(time.time()%1000)))
+        homes.append(res['home']); draws.append(res['draw']); aways.append(res['away'])
+    final={'home': sum(homes)/len(homes), 'draw': sum(draws)/len(draws), 'away': sum(aways)/len(aways)}
+    cache_set(key,final,TTL['predictions']); return final
 
-    fake_msg = types.Message()
-    fake_msg.message_id = call.message.message_id
-    fake_msg.from_user = call.from_user
-    fake_msg.chat = call.message.chat
-    fake_msg.text = data[5:] if data.startswith("cmd_/") else None
-    fake_msg.date = call.message.date
+# store predictions
+PRED = {}
 
-    if data.startswith("cmd_/"):
-        cmd = data[5:]
-        if cmd == "/today": today_handler(fake_msg)
-        elif cmd == "/live": live_cmd(fake_msg)
-        elif cmd == "/results": results_cmd(fake_msg)
-        elif cmd == "/fpl": fpl_cmd(fake_msg)
-        else: dynamic_league_handler(fake_msg)
-    elif data.startswith("help_"):
-        show_help_page(call.message, int(data.split("_")[1]))
+def store_prediction(match_id, pred):
+    PRED[str(match_id)] = {'pred': pred, 'time': time.time()}
 
-# ============================= WEBHOOK =============================
-app = Flask(__name__)
+def compare_today_results():
+    today=date.today().isoformat(); total=0; correct=0; details=[]
+    for lid in LEAGUES.values():
+        data=safe_get(f"{API_BASE}/competitions/{lid}/matches", params={"status":"FINISHED","dateFrom":today,"dateTo":today})
+        matches=data.get("matches",[]) if data else []
+        for m in matches:
+            mid=str(m['id']); ft=m.get('score',{}).get('fullTime',{}); hg=ft.get('home'); ag=ft.get('away')
+            if hg is None or ag is None: continue
+            actual = 'home' if hg>ag else ('draw' if hg==ag else 'away')
+            pred = PRED.get(mid)
+            if pred:
+                p_choice=max(('home','draw','away'), key=lambda k: pred['pred'].get(k,0))
+                if p_choice==actual: correct+=1
+                total+=1
+                details.append({'match': f"{m['homeTeam']['name']} vs {m['awayTeam']['name']}", 'predicted': p_choice, 'actual': actual, 'confidence': pred['pred'].get(p_choice,0)})
+    acc = (correct/total*100) if total else None
+    return {'accuracy':acc,'total':total,'correct':correct,'details':details}
 
-@app.route(f'/{BOT_TOKEN}', methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        update = telebot.types.Update.de_json(request.get_data().decode('utf-8'))
-        bot.process_new_updates([update])
-        return 'OK', 200
-    return 'Invalid', 403
+# Aiogram bot
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 
-@app.route('/')
-def index():
-    return 'KickVision v1.3.0 Running'
+# helpers to build inline menus
+def main_menu(page=1):
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    if page==1:
+        kb.add(types.InlineKeyboardButton("Premier League", callback_data="league_2021"),
+               types.InlineKeyboardButton("Champions League", callback_data="league_2001"))
+        kb.add(types.InlineKeyboardButton("La Liga", callback_data="league_2014"),
+               types.InlineKeyboardButton("Serie A", callback_data="league_2019"))
+        kb.add(types.InlineKeyboardButton("Bundesliga", callback_data="league_2002"),
+               types.InlineKeyboardButton("Next ▶", callback_data="menu_page_2"))
+    else:
+        kb.add(types.InlineKeyboardButton("Today", callback_data="today"),
+               types.InlineKeyboardButton("Live", callback_data="live"))
+        kb.add(types.InlineKeyboardButton("Results", callback_data="results"),
+               types.InlineKeyboardButton("Standings", callback_data="standings"))
+        kb.add(types.InlineKeyboardButton("FPL", callback_data="fpl"),
+               types.InlineKeyboardButton("Top Scorers", callback_data="scorers"))
+        kb.add(types.InlineKeyboardButton("◀ Back", callback_data="menu_page_1"))
+    return kb
 
-if __name__ == '__main__':
-    log.info("KickVision v1.3.0 STARTED")
-    bot.remove_webhook()
-    time.sleep(1)
-    bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{BOT_TOKEN}")
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+@dp.message_handler(commands=['start'])
+async def cmd_start(message: types.Message):
+    await message.answer(f"KickVision v{VERSION} — choose", reply_markup=main_menu(page=1))
+
+@dp.callback_query_handler(lambda c: True)
+async def cb_handler(c: types.CallbackQuery):
+    data = c.data
+    try:
+        if data == "menu_page_2":
+            await c.message.edit_text("KickVision — Tools", reply_markup=main_menu(page=2)); return
+        if data == "menu_page_1":
+            await c.message.edit_text("KickVision — Leagues", reply_markup=main_menu(page=1)); return
+
+        if data.startswith("league_"):
+            lid = int(data.split("_",1)[1])
+            fixtures = get_upcoming_fixtures(lid, days=7, limit=5)
+            if not fixtures:
+                await c.answer("No upcoming fixtures"); return
+            lines=[]
+            for m in fixtures:
+                h = m['homeTeam']['name']; a = m['awayTeam']['name']; t = m['utcDate'][11:16]
+                h_stats = get_team_recent_stats(m['homeTeam']['id']); a_stats = get_team_recent_stats(m['awayTeam']['id'])
+                pred = ensemble_predict(h_stats, a_stats)
+                store_prediction(m['id'], pred)
+                lines.append(f"{h} vs {a} @ {t} UTC\nHome {pred['home']*100:.1f}% | Draw {pred['draw']*100:.1f}% | Away {pred['away']*100:.1f}%")
+            await c.message.edit_text("\n\n".join(lines)[:3900]); return
+
+        if data == "today":
+            texts=[]
+            for name,lid in LEAGUES.items():
+                fixtures=get_upcoming_fixtures(lid, days=0, limit=4)
+                if not fixtures: continue
+                texts.append(f"🏆 {name.title()} 🏆")
+                for m in fixtures:
+                    h=m['homeTeam']['name']; a=m['awayTeam']['name']; t=m['utcDate'][11:16]
+                    h_stats=get_team_recent_stats(m['homeTeam']['id']); a_stats=get_team_recent_stats(m['awayTeam']['id'])
+                    pred=ensemble_predict(h_stats,a_stats); store_prediction(m['id'],pred)
+                    texts.append(f"{t} UTC — {h} vs {a}\nHome {pred['home']*100:.1f}% | Draw {pred['draw']*100:.1f}% | Away {pred['away']*100:.1f}%")
+            await c.message.edit_text("\n\n".join(texts)[:3900]); return
+
+        if data == "live":
+            collected=[]
+            for lid in LEAGUES.values():
+                data_resp = safe_get(f"{API_BASE}/competitions/{lid}/matches", params={"status":"LIVE"})
+                matches=data_resp.get("matches",[]) if data_resp else []
+                for m in matches:
+                    score = m.get("score",{}).get("fullTime",{})
+                    collected.append(f"{m['homeTeam']['name']} {score.get('home','-')} - {score.get('away','-')} {m['awayTeam']['name']}")
+            await c.message.edit_text("\n".join(collected) if collected else "No live matches right now."); return
+
+        if data == "results":
+            comp = compare_today_results()
+            if comp['total']==0:
+                await c.message.edit_text("No finished matches with stored predictions today."); return
+            out=[f"Results comparison — {comp['total']} matches"]
+            if comp['accuracy'] is not None:
+                out.append(f"Accuracy: {comp['accuracy']:.2f}% ({comp['correct']}/{comp['total']})")
+            for d in comp['details'][:10]:
+                out.append(f"{d['match']}: predicted {d['predicted']} — actual {d['actual']}")
+            await c.message.edit_text("\n".join(out)[:3900]); return
+
+        if data == "standings":
+            kb = types.InlineKeyboardMarkup(row_width=2)
+            for name,lid in LEAGUES.items():
+                kb.add(types.InlineKeyboardButton(name.title(), callback_data=f"stand_{lid}"))
+            kb.add(types.InlineKeyboardButton("Back", callback_data="menu_page_2"))
+            await c.message.edit_text("Choose league for standings:", reply_markup=kb); return
+
+        if data.startswith("stand_"):
+            lid=int(data.split("_",1)[1])
+            resp = safe_get(f"{API_BASE}/competitions/{lid}/standings")
+            if not resp:
+                await c.answer("Standings unavailable"); return
+            txt=f"{LEAGUE_DISPLAY.get(lid,'League')} Standings\n"
+            for s in resp.get("standings",[]):
+                if s.get("type")=="TOTAL":
+                    for row in s.get("table",[])[:10]:
+                        txt+=f"{row['position']}. {row['team']['name']} — {row['points']} pts\n"
+                    break
+            await c.message.edit_text(txt[:3900]); return
+
+        if data == "fpl":
+            b = safe_get(f"{FPL_BASE}/bootstrap-static/")
+            if not b:
+                await c.message.edit_text("FPL data unavailable"); return
+            top = sorted(b.get("elements",[]), key=lambda x: float(x.get("form") or 0), reverse=True)[:8]
+            text = "Top FPL form players (sample):\n"
+            for p in top:
+                text += f"{p.get('web_name')} — form {p.get('form')} — selected {p.get('selected_by_percent')}\n"
+            await c.message.edit_text(text[:3900]); return
+
+        if data == "scorers":
+            kb = types.InlineKeyboardMarkup(row_width=2)
+            for name,lid in LEAGUES.items():
+                kb.add(types.InlineKeyboardButton(name.title(), callback_data=f"scor_{lid}"))
+            kb.add(types.InlineKeyboardButton("Back", callback_data="menu_page_2"))
+            await c.message.edit_text("Choose a league for top scorers:", reply_markup=kb); return
+
+        if data.startswith("scor_"):
+            lid=int(data.split("_",1)[1])
+            sdata = safe_get(f"{API_BASE}/competitions/{lid}/scorers")
+            if not sdata:
+                await c.answer("Scorers unavailable"); return
+            lines=[f"{sc['player']['name']} — {sc['team']['name']} — {sc['goals']} goals" for sc in sdata.get("scorers",[])[:10]]
+            await c.message.edit_text("\n".join(lines)[:3900]); return
+
+        await c.answer("Unknown action")
+    except Exception:
+        log.exception("Callback error")
+        try:
+            await c.answer("Error processing request")
+        except:
+            pass
+
+# Webhook handlers: aiohttp app
+async def on_startup(app):
+    if WEBHOOK_URL:
+        await bot.set_webhook(WEBHOOK_URL)
+        log.info(f"Aiogram webhook set to {WEBHOOK_URL}")
+
+async def on_shutdown(app):
+    await bot.delete_webhook()
+    await bot.close()
+
+async def handle(request):
+    body = await request.text()
+    update = types.Update.to_object(json.loads(body))
+    await dp.process_update(update)
+    return web.Response(text="OK")
+
+# optional daily broadcaster coroutine
+async def daily_broadcaster():
+    last_date=None
+    while True:
+        try:
+            now_utc = datetime.utcnow()
+            today = now_utc.date()
+            if now_utc.hour >= 23 and last_date != today and ADMIN_CHAT_IDS:
+                comp = compare_today_results()
+                if comp['total'] > 0:
+                    text = f"Daily results comparison — {comp['total']} matches\n"
+                    if comp['accuracy'] is not None:
+                        text += f"Accuracy: {comp['accuracy']:.2f}% ({comp['correct']}/{comp['total']})\n\n"
+                    for d in comp['details'][:10]:
+                        text += f"{d['match']}: predicted {d['predicted']} — actual {d['actual']}\n"
+                    for cid in ADMIN_CHAT_IDS:
+                        try:
+                            await bot.send_message(cid, text[:3900])
+                        except Exception:
+                            log.exception("notify admin failed")
+                last_date = today
+        except Exception:
+            log.exception("broadcaster error")
+        await asyncio.sleep(60*30)
+
+if __name__ == "__main__":
+    # run aiohttp webhook
+    app = web.Application()
+    app.router.add_post(f"/{BOT_TOKEN}", handle)
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+    # optionally start broadcaster task
+    if ADMIN_CHAT_IDS:
+        loop = asyncio.get_event_loop()
+        loop.create_task(daily_broadcaster())
+    log.info("Starting Aiogram webhook app")
+    web.run_app(app, host="0.0.0.0", port=PORT)
