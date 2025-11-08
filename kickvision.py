@@ -724,7 +724,8 @@ def run_bot_polling():
     except Exception:
         log.exception("bot polling stopped")
 
-if __name__ == "__main__":
+    print("Starting KickVision...")
+    app.run(host="0.0.0.0", port=PORT)if __name__ == "__main__":
     # start telebot polling in background thread
     t = threading.Thread(target=run_bot_polling, daemon=True)
     t.start()
@@ -737,4 +738,17 @@ if __name__ == "__main__":
 
     log.info("Starting Flask app (KickVision Telebot)")
     # User said Render works with app.run trick — run Flask to keep process alive
+   if __name__ == "__main__":
+    print("🧹 Cleaning up old webhook (if any)...")
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Webhook deleted successfully.")
+    except Exception as e:
+        print(f"⚠️ Webhook cleanup failed: {e}")
+
+    print("🚀 Starting KickVision v1.0.0...")
+    # Start bot polling (Render Flask trick mode)
+    bot.polling(non_stop=True, timeout=60)
+    
+    # Keep Flask app running so Render doesn’t shut down
     app.run(host="0.0.0.0", port=PORT)
